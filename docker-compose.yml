@@ -165,6 +165,8 @@ services:
     environment:
       EIA_API_KEY: ${EIA_API_KEY}
       KAFKA_BROKER: ${KAFKA_BROKER}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
       - ./ingestion/src:/app/src
     depends_on:

@@ -5,4 +5,4 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src /app/src
-CMD ["python", "-m", "src.fetch_eia"]
+CMD ["sh", "-c", "python -m src.fetch_eia & python -m src.publish_kafka"]

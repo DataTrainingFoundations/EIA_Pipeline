@@ -1,2 +1,6 @@
 requests
 kafka-python
+python-dotenv
+minio
+pyspark
+boto3

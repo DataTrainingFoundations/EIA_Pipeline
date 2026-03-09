@@ -1,4 +1,6 @@
-requests
-kafka-python
-boto3
+apache-airflow-providers-docker
 psycopg2-binary
+pyarrow
+s3fs
+pyyaml
+kafka-python

@@ -44,6 +44,7 @@ services:
       mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
       mc mb -p local/bronze;
       mc mb -p local/silver;
+      mc mb -p local/gold;
       mc ls local;
       exit 0;
       "
@@ -145,6 +146,8 @@ services:
       - "28080:8080"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
+      - ./ingestion/src:/opt/airflow/ingestion/src
+      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health > /dev/null"]
       interval: 10s
@@ -172,8 +175,6 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
-    profiles:
-      - tools
 
   app:
     build:

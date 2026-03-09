@@ -1,71 +1,75 @@
-from kafka import KafkaConsumer
-from minio import Minio
+"""
+publish_kafka.py
+----------------
+Kafka producer utility. Serializes records as JSON and publishes
+them to a given topic. Used by fetch_eia.py.
+"""
+
 import json
-from datetime import datetime
-from dotenv import load_dotenv
-from pyspark.sql import SparkSession
-import io
+import logging
 import os
+from typing import Any
 
-load_dotenv()
-# Kafka configuration
-KAFKA_TOPIC = "eia_energy"
-KAFKA_BROKER = os.getenv('KAFKA_BROKER')
+from kafka import KafkaProducer
+from kafka.errors import KafkaError
 
-# MinIO configuration
-MINIO_ENDPOINT = "minio:9000"
-ACCESS_KEY = os.getenv("MINIO_ROOT_USER")
-SECRET_KEY = os.getenv("MINIO_ROOT_PASSWORD")
-BUCKET_NAME = "bronze"
-
-spark = SparkSession.builder \
-    .appName("EIABatchConsumer") \
-    .config("spark.hadoop.fs.s3a.endpoint", MINIO_ENDPOINT) \
-    .config("spark.hadoop.fs.s3a.access.key", ACCESS_KEY) \
-    .config("spark.hadoop.fs.s3a.secret.key", SECRET_KEY) \
-    .config("spark.hadoop.fs.s3a.path.style.access", "true") \
-    .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \
-    .getOrCreate()
-
-consumer = KafkaConsumer(
-    KAFKA_TOPIC,
-    bootstrap_servers=KAFKA_BROKER,
-    value_deserializer=lambda v: json.loads(v.decode("utf-8")),
-    auto_offset_reset="earliest",
-    enable_auto_commit=True,
-    group_id="eia-consumers"
-)
+logger = logging.getLogger(__name__)
 
 
-minio_client = Minio(
-    MINIO_ENDPOINT,
-    access_key=ACCESS_KEY,
-    secret_key=SECRET_KEY,
-    secure=False
-)
+def get_producer(broker: str | None = None) -> KafkaProducer:
+    """Create and return a KafkaProducer instance."""
+    broker = broker or os.environ["KAFKA_BROKER"]
+    producer = KafkaProducer(
+        bootstrap_servers=broker,
+        value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+        key_serializer=lambda k: k.encode("utf-8") if k else None,
+        acks="all",
+        retries=5,
+        retry_backoff_ms=500,
+    )
+    logger.info("KafkaProducer connected to %s", broker)
+    return producer
 
-# Create bucket if it doesn't exist
-if not minio_client.bucket_exists(BUCKET_NAME):
-    minio_client.make_bucket(BUCKET_NAME)
 
-print("Consumer running...")
+def publish_records(
+    producer: KafkaProducer,
+    topic: str,
+    records: list[dict[str, Any]],
+    key_field: str | None = None,
+) -> int:
+    """
+    Publish a list of record dicts to a Kafka topic.
 
-for message in consumer:
-    batch = message.value  # This is a list of dicts
-    if not batch:
-        continue
+    Args:
+        producer:    An active KafkaProducer.
+        topic:       Destination Kafka topic name.
+        records:     List of dicts to publish.
+        key_field:   Optional dict key whose value becomes the Kafka message key.
 
-    # Convert list of dicts to Spark DataFrame
-    df = spark.createDataFrame(batch)
+    Returns:
+        Number of records successfully sent.
+    """
+    sent = 0
+    futures = []
 
-    # Optional: you can enforce column types
-    df = df.withColumn("value", df["value"].cast("double"))
+    for record in records:
+        key = str(record.get(key_field)) if key_field and key_field in record else None
+        future = producer.send(topic, value=record, key=key)
+        futures.append(future)
 
-    # Build path in MinIO (partition by date)
-    dt_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    s3_path = f"s3a://{BUCKET_NAME}/eia/{dt_str}/"
+    for future in futures:
+        try:
+            future.get(timeout=10)
+            sent += 1
+        except KafkaError as exc:
+            logger.error("Failed to publish record: %s", exc)
 
-    # Write batch as Parquet
-    df.write.mode("append").parquet(s3_path)
+    producer.flush()
+    logger.info("Published %d/%d records to topic '%s'", sent, len(records), topic)
+    return sent
 
-    print(f"Uploaded batch of {len(batch)} records to {s3_path}")
+
+def close_producer(producer: KafkaProducer) -> None:
+    """Gracefully close the producer."""
+    producer.close()
+    logger.info("KafkaProducer closed.")

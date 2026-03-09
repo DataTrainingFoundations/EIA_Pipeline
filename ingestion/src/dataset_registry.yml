@@ -1,0 +1,58 @@
+datasets:
+  - id: electricity_generation_hourly
+    name: "Electricity Generation by Source (Hourly)"
+    kafka_topic: "eia.electricity.generation"
+    eia_route: "electricity/rto/fuel-type-data"
+    frequency: "hourly"
+    rolling_days: 7
+    params:
+      frequency: hourly
+      data:
+        - value
+      facets:
+        type:
+          - NG   # Natural Gas
+          - COL  # Coal
+          - NUC  # Nuclear
+          - WND  # Wind
+          - SUN  # Solar
+          - WAT  # Hydro
+      sort:
+        - column: period
+          direction: desc
+      length: 500
+    schema:
+      period: string       # e.g. "2024-01-01T00"
+      respondent: string   # Balancing authority
+      respondent-name: string
+      fueltype: string
+      type-name: string
+      value: float
+      value-units: string
+
+  - id: electricity_demand_hourly
+    name: "Electricity Demand by Region (Hourly)"
+    kafka_topic: "eia.electricity.demand"
+    eia_route: "electricity/rto/region-data"
+    frequency: "hourly"
+    rolling_days: 7
+    params:
+      frequency: hourly
+      data:
+        - value
+      facets:
+        type:
+          - D    # Demand
+          - DF   # Demand Forecast
+      sort:
+        - column: period
+          direction: desc
+      length: 500
+    schema:
+      period: string
+      respondent: string
+      respondent-name: string
+      type: string
+      type-name: string
+      value: float
+      value-units: string

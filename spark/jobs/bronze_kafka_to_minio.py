@@ -43,7 +43,7 @@ def build_spark_session(app_name: str) -> SparkSession:
         SparkSession.builder.appName(app_name)
         .master(os.environ.get("SPARK_MASTER", "spark://spark-master:7077"))
         .config("spark.jars.packages",
-                "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,"
+                "org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.0,"
                 "org.apache.hadoop:hadoop-aws:3.3.4,"
                 "com.amazonaws:aws-java-sdk-bundle:1.12.262")
         .config("spark.hadoop.fs.s3a.endpoint", MINIO_ENDPOINT)

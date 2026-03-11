@@ -79,6 +79,9 @@ services:
     image: apache/spark:4.1.0
     environment:
       SPARK_NO_DAEMONIZE: "true"
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      KAFKA_BROKER: ${KAFKA_BROKER}
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "--host", "spark-master", "--port", "7077", "--webui-port", "8080"]
     ports:
       - "27077:7077"
@@ -95,6 +98,8 @@ services:
     image: apache/spark:4.1.0
     environment:
       SPARK_NO_DAEMONIZE: "true"
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "--webui-port", "8081", "spark://spark-master:7077"]
     ports:
       - "28089:8081"
@@ -112,6 +117,8 @@ services:
     image: apache/spark:4.1.0
     environment:
       SPARK_NO_DAEMONIZE: "true"
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "--webui-port", "8082", "spark://spark-master:7077"]
     ports:
       - "28090:8082"

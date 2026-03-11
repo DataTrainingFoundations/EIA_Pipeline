@@ -48,13 +48,20 @@ SPARK_JOBS_DIR = "/opt/spark/jobs"
 
 SPARK_PACKAGES = (
     "org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.0,"
-    "org.apache.hadoop:hadoop-aws:3.3.4,"
+    "org.apache.hadoop:hadoop-aws:3.4.2,"
     "com.amazonaws:aws-java-sdk-bundle:1.12.262"
 )
 
 # Run spark-submit inside the spark-master container via docker exec
 def spark_submit_cmd(script: str, args: str = "") -> str:
     """Build a docker exec command that runs spark-submit on spark-master."""
+    env_vars = (
+        f"MINIO_ENDPOINT={MINIO_ENDPOINT} "
+        f"MINIO_ROOT_USER={MINIO_USER} "
+        f"MINIO_ROOT_PASSWORD={MINIO_PASSWORD} "
+        f"KAFKA_BROKER={KAFKA_BROKER} "
+        f"SPARK_MASTER={SPARK_MASTER} "
+    )
     submit = (
         f"mkdir -p /tmp/ivy2 && "
         f"/opt/spark/bin/spark-submit "
@@ -67,9 +74,10 @@ def spark_submit_cmd(script: str, args: str = "") -> str:
         f"--conf spark.hadoop.fs.s3a.path.style.access=true "
         f"--conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem "
         f"--conf spark.hadoop.fs.s3a.connection.ssl.enabled=false "
+        f"--conf spark.hadoop.fs.s3a.aws.credentials.provider=org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider "
         f"{SPARK_JOBS_DIR}/{script} {args}"
     )
-    return f"docker exec $(docker ps -qf name=spark-master) bash -c '{submit}'"
+    return f"docker exec $(docker ps -qf name=spark-master) bash -c '{env_vars}{submit}'"
 
 # ── DAG defaults ─────────────────────────────────────────────────────────────
 default_args = {

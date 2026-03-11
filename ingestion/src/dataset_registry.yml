@@ -10,7 +10,7 @@ datasets:
       data:
         - value
       facets:
-        type:
+        fueltype:
           - NG   # Natural Gas
           - COL  # Coal
           - NUC  # Nuclear

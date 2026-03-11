@@ -4,6 +4,7 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      APP_TIMEZONE: ${APP_TIMEZONE}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "25432:5432"
@@ -44,6 +45,7 @@ services:
       mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
       mc mb -p local/bronze;
       mc mb -p local/silver;
+      mc mb -p local/gold;
       mc ls local;
       exit 0;
       "
@@ -75,7 +77,7 @@ services:
       retries: 20
 
   spark-master:
-    image: apache/spark:4.1.0
+    image: apache/spark:3.5.1
     environment:
       SPARK_NO_DAEMONIZE: "true"
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "--host", "spark-master", "--port", "7077", "--webui-port", "8080"]
@@ -84,6 +86,7 @@ services:
       - "28088:8080"
     volumes:
       - ./spark/jobs:/opt/spark/jobs
+      - ./spark/common:/opt/spark/common
     depends_on:
       kafka:
         condition: service_healthy
@@ -91,7 +94,7 @@ services:
         condition: service_healthy
 
   spark-worker-1:
-    image: apache/spark:4.1.0
+    image: apache/spark:3.5.1
     environment:
       SPARK_NO_DAEMONIZE: "true"
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "--webui-port", "8081", "spark://spark-master:7077"]
@@ -99,6 +102,7 @@ services:
       - "28089:8081"
     volumes:
       - ./spark/jobs:/opt/spark/jobs
+      - ./spark/common:/opt/spark/common
     healthcheck:
       test: ["CMD-SHELL", "ps -ef | grep -q '[o]rg.apache.spark.deploy.worker.Worker'"]
       interval: 10s
@@ -108,7 +112,7 @@ services:
       - spark-master
 
   spark-worker-2:
-    image: apache/spark:4.1.0
+    image: apache/spark:3.5.1
     environment:
       SPARK_NO_DAEMONIZE: "true"
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "--webui-port", "8082", "spark://spark-master:7077"]
@@ -116,6 +120,7 @@ services:
       - "28090:8082"
     volumes:
       - ./spark/jobs:/opt/spark/jobs
+      - ./spark/common:/opt/spark/common
     healthcheck:
       test: ["CMD-SHELL", "ps -ef | grep -q '[o]rg.apache.spark.deploy.worker.Worker'"]
       interval: 10s
@@ -128,23 +133,34 @@ services:
     build:
       context: ./airflow
       dockerfile: Dockerfile
-    command: ["standalone"]
+    user: "0:0"
+    entrypoint: ["/opt/airflow/scripts/bootstrap.sh"]
     environment:
       AIRFLOW__CORE__EXECUTOR: ${AIRFLOW__CORE__EXECUTOR}
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN}
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
       AIRFLOW__CORE__LOAD_EXAMPLES: ${AIRFLOW__CORE__LOAD_EXAMPLES}
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'False'
       _AIRFLOW_WWW_USER_CREATE: ${AIRFLOW_WWW_USER_CREATE}
       _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_WWW_USER_USERNAME}
       _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_WWW_USER_PASSWORD}
+      AIRFLOW_WWW_USER_FIRSTNAME: ${AIRFLOW_WWW_USER_FIRSTNAME}
+      AIRFLOW_WWW_USER_LASTNAME: ${AIRFLOW_WWW_USER_LASTNAME}
+      AIRFLOW_WWW_USER_EMAIL: ${AIRFLOW_WWW_USER_EMAIL}
+      AIRFLOW_BACKFILL_SCHEDULE: ${AIRFLOW_BACKFILL_SCHEDULE}
+      AIRFLOW_PLATINUM_GRID_OPERATIONS_SCHEDULE: ${AIRFLOW_PLATINUM_GRID_OPERATIONS_SCHEDULE}
+      AIRFLOW_PLATINUM_RESOURCE_PLANNING_SCHEDULE: ${AIRFLOW_PLATINUM_RESOURCE_PLANNING_SCHEDULE}
       EIA_API_KEY: ${EIA_API_KEY}
       KAFKA_BROKER: ${KAFKA_BROKER}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      COMPOSE_PROJECT_NAME: eia_pipeline
     ports:
       - "28080:8080"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
+      - ./:/workspace
+      - airflow_logs:/opt/airflow/logs
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health > /dev/null"]
       interval: 10s
@@ -183,6 +199,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      APP_TIMEZONE: ${APP_TIMEZONE}
     ports:
       - "28501:8501"
     healthcheck:
@@ -194,7 +211,48 @@ services:
       postgres:
         condition: service_healthy
 
+  admin-app:
+    build:
+      context: .
+      dockerfile: admin_app/Dockerfile
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      APP_TIMEZONE: ${APP_TIMEZONE}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      EIA_API_KEY: ${EIA_API_KEY}
+      ADMIN_APP_API_CACHE_TTL_SECONDS: ${ADMIN_APP_API_CACHE_TTL_SECONDS:-300}
+      ADMIN_APP_QUERY_TIMEOUT_SECONDS: ${ADMIN_APP_QUERY_TIMEOUT_SECONDS:-60}
+      ADMIN_APP_DEFAULT_DAYS: ${ADMIN_APP_DEFAULT_DAYS:-7}
+      ADMIN_APP_LOG_DIR: /opt/airflow/logs
+    ports:
+      - "28502:8501"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=5)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      airflow:
+        condition: service_healthy
+    volumes:
+      - airflow_logs:/opt/airflow/logs:ro
+
 volumes:
   postgres_data:
   minio_data:
   kafka_data:
+  airflow_logs:
+
+
+
+

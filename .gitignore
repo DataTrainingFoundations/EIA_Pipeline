@@ -27,4 +27,5 @@ Thumbs.db
 # Logs
 *.log
 logs/
+airflow/logs/
 

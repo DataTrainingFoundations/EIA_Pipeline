@@ -1,0 +1,10 @@
+streamlit
+pandas
+duckdb
+pyarrow
+s3fs
+psycopg2-binary
+requests
+python-dateutil
+PyYAML
+pytest

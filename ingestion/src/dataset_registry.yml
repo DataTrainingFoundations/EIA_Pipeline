@@ -1,0 +1,34 @@
+datasets:
+  - id: electricity_region_data
+    route: electricity/rto/region-data
+    topic: eia_electricity_region_data
+    frequency: hourly
+    data_columns:
+      - value
+    default_facets:
+      type:
+        - D
+        - DF
+    bronze_output_path: s3a://bronze/electricity_region_data
+    bronze_checkpoint_path: s3a://bronze/checkpoints/electricity_region_data
+    silver_output_path: s3a://silver/region_data
+    gold_output_path: s3a://gold/facts/region_demand_forecast_hourly
+    platinum_table: platinum.region_demand_daily
+    backfill:
+      start: "2020-01-01T00:00:00+00:00"
+      step: day
+      max_pending_chunks: 14
+  - id: electricity_fuel_type_data
+    route: electricity/rto/fuel-type-data
+    topic: eia_electricity_fuel_type_data
+    frequency: hourly
+    data_columns:
+      - value
+    bronze_output_path: s3a://bronze/electricity_fuel_type_data
+    bronze_checkpoint_path: s3a://bronze/checkpoints/electricity_fuel_type_data
+    silver_output_path: s3a://silver/fuel_type_data
+    gold_output_path: s3a://gold/facts/fuel_generation_hourly
+    backfill:
+      start: "2020-01-01T00:00:00+00:00"
+      step: day
+      max_pending_chunks: 14

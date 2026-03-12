@@ -2,3 +2,5 @@ requests
 kafka-python
 boto3
 psycopg2-binary
+PyYAML
+pyspark==3.5.1

@@ -17,6 +17,7 @@ from airflow.utils.trigger_rule import TriggerRule
 from pipeline_builders import (
     build_bronze_command,
     build_bronze_verification_command,
+    bronze_write_pool,
     build_curated_gold_command,
     build_fetch_command,
     build_merge_task,
@@ -77,7 +78,11 @@ def build_incremental_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
             task_id="ingest_to_kafka",
             bash_command=build_fetch_command(dataset_id, cli_start_expr, cli_end_expr, max_pages=20),
         )
-        bronze = BashOperator(task_id="spark_bronze_batch", bash_command=build_bronze_command(dataset))
+        bronze = BashOperator(
+            task_id="spark_bronze_batch",
+            bash_command=build_bronze_command(dataset),
+            pool=bronze_write_pool(dataset_id),
+        )
         silver = BashOperator(
             task_id="spark_silver_batch",
             bash_command=build_silver_command(dataset, dataset_id, start_expr, end_expr),
@@ -177,7 +182,11 @@ def build_backfill_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
             task_id="ingest_backfill_chunk",
             bash_command=build_fetch_command(dataset_id, chunk_cli_start_expr, chunk_cli_end_expr, max_pages=50),
         )
-        bronze = BashOperator(task_id="spark_bronze_backfill_batch", bash_command=build_bronze_command(dataset))
+        bronze = BashOperator(
+            task_id="spark_bronze_backfill_batch",
+            bash_command=build_bronze_command(dataset),
+            pool=bronze_write_pool(dataset_id),
+        )
         silver = BashOperator(
             task_id="spark_silver_backfill",
             bash_command=build_silver_command(dataset, dataset_id, chunk_start_expr, chunk_end_expr),
@@ -375,7 +384,11 @@ def build_bronze_repair_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
             task_id="ingest_bronze_repair_hour",
             bash_command=build_fetch_command(dataset_id, chunk_cli_start_expr, chunk_cli_end_expr, max_pages=20),
         )
-        bronze = BashOperator(task_id="spark_bronze_repair_batch", bash_command=build_bronze_command(dataset))
+        bronze = BashOperator(
+            task_id="spark_bronze_repair_batch",
+            bash_command=build_bronze_command(dataset),
+            pool=bronze_write_pool(dataset_id),
+        )
         silver = BashOperator(
             task_id="spark_silver_repair",
             bash_command=build_silver_command(dataset, dataset_id, chunk_start_expr, chunk_end_expr),

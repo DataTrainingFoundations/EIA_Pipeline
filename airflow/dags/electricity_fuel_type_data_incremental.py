@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 
-from pipeline_builders import build_bronze_command, build_curated_gold_command, build_fetch_command, build_silver_command
+from pipeline_builders import build_bronze_command, bronze_write_pool, build_curated_gold_command, build_fetch_command, build_silver_command
 from pipeline_support import get_dataset
 
 DATASET = get_dataset("electricity_fuel_type_data")
@@ -32,6 +32,7 @@ with DAG(
     bronze = BashOperator(
         task_id="spark_bronze_batch",
         bash_command=build_bronze_command(DATASET),
+        pool=bronze_write_pool("electricity_fuel_type_data"),
     )
     silver = BashOperator(
         task_id="spark_silver_batch",

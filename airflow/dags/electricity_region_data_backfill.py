@@ -9,6 +9,7 @@ from airflow.utils.trigger_rule import TriggerRule
 
 from pipeline_builders import (
     build_bronze_command,
+    bronze_write_pool,
     build_curated_gold_command,
     build_fetch_command,
     build_merge_task,
@@ -70,6 +71,7 @@ with DAG(
     bronze = BashOperator(
         task_id="spark_bronze_backfill_batch",
         bash_command=build_bronze_command(DATASET),
+        pool=bronze_write_pool("electricity_region_data"),
     )
     silver = BashOperator(
         task_id="spark_silver_backfill",

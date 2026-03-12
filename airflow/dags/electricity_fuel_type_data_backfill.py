@@ -7,7 +7,7 @@ from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator, ShortCircuitOperator
 from airflow.utils.trigger_rule import TriggerRule
 
-from pipeline_builders import build_bronze_command, build_curated_gold_command, build_fetch_command, build_silver_command
+from pipeline_builders import build_bronze_command, bronze_write_pool, build_curated_gold_command, build_fetch_command, build_silver_command
 from pipeline_constants import BACKFILL_SCHEDULE
 from pipeline_support import (
     claim_next_backfill_chunk,
@@ -57,6 +57,7 @@ with DAG(
     bronze = BashOperator(
         task_id="spark_bronze_backfill_batch",
         bash_command=build_bronze_command(DATASET),
+        pool=bronze_write_pool("electricity_fuel_type_data"),
     )
     silver = BashOperator(
         task_id="spark_silver_backfill",

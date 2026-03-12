@@ -132,6 +132,7 @@ def test_pipeline_builders_render_expected_commands_and_tasks(monkeypatch) -> No
 
     fetch_command = pipeline_builders.build_fetch_command("electricity_region_data", "2026-03-10T00", "2026-03-10T01", 20)
     bronze_command = pipeline_builders.build_bronze_command(REGION_DATASET)
+    bronze_pool = pipeline_builders.bronze_write_pool("electricity_region_data")
     silver_command = pipeline_builders.build_silver_command(REGION_DATASET, "electricity_region_data", "start", "end", validation_only=True)
     gold_command = pipeline_builders.build_curated_gold_command("electricity_region_data", "start", "end")
     platinum_command = pipeline_builders.build_region_daily_platinum_command("platinum.stage", "start", "end")
@@ -144,6 +145,7 @@ def test_pipeline_builders_render_expected_commands_and_tasks(monkeypatch) -> No
 
     assert "python -m src.fetch_eia --dataset electricity_region_data" in fetch_command
     assert "BRONZE_OUTPUT_PATH=s3a://bronze/region" in bronze_command
+    assert bronze_pool == "electricity_region_data_bronze_write"
     assert "--validation-only" in silver_command
     assert "gold_region_fuel_serving_hourly.py" in gold_command
     assert "platinum_region_demand_daily.py" in platinum_command
@@ -170,6 +172,10 @@ def test_dataset_dag_builders_include_expected_tasks_for_region_and_fuel(monkeyp
     assert "spark_platinum_stage" in incremental_region.task_dict
     assert "spark_platinum_stage" not in incremental_fuel.task_dict
     assert incremental_region.get_task("spark_curated_gold_batch").downstream_task_ids == {"spark_platinum_stage"}
+    assert incremental_region.get_task("spark_bronze_batch").pool == "electricity_region_data_bronze_write"
+    assert incremental_fuel.get_task("spark_bronze_batch").pool == "electricity_fuel_type_data_bronze_write"
+    assert backfill_region.get_task("spark_bronze_backfill_batch").pool == "electricity_region_data_bronze_write"
+    assert repair_region.get_task("spark_bronze_repair_batch").pool == "electricity_region_data_bronze_write"
     assert incremental_region.get_task("validate_platinum_rows").op_kwargs["allow_empty_result"] is True
     assert incremental_region.get_task("validate_platinum_distinct_respondents").op_kwargs["allow_empty_result"] is True
     assert incremental_region.get_task("validate_platinum_nonnegative_demand").op_kwargs["allow_empty_result"] is True

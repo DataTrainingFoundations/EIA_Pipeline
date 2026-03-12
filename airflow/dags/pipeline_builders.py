@@ -20,6 +20,10 @@ from pipeline_support import (
 )
 
 
+def bronze_write_pool(dataset_id: str) -> str:
+    return f"{dataset_id}_bronze_write"
+
+
 def build_fetch_command(dataset_id: str, start_expression: str, end_expression: str, max_pages: int) -> str:
     return (
         "PYTHONPATH=/workspace/ingestion "

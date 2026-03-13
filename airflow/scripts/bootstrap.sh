@@ -10,10 +10,6 @@ readonly DATASET_DAGS=(
   electricity_region_data_backfill
   electricity_fuel_type_data_incremental
   electricity_fuel_type_data_backfill
-  electricity_region_data_bronze_hourly_verification
-  electricity_fuel_type_data_bronze_hourly_verification
-  electricity_region_data_bronze_hourly_repair
-  electricity_fuel_type_data_bronze_hourly_repair
 )
 readonly PLATINUM_DAGS=(
   platinum_grid_operations_hourly
@@ -23,6 +19,7 @@ readonly ALL_DAGS=("${DATASET_DAGS[@]}" "${PLATINUM_DAGS[@]}")
 readonly BRONZE_WRITE_POOLS=(
   electricity_region_data_bronze_write
   electricity_fuel_type_data_bronze_write
+  global_backfill_worker
 )
 
 wait_for_airflow_db() {
@@ -108,7 +105,12 @@ airflow users create \
   --email "${AIRFLOW_WWW_USER_EMAIL:-admin@example.com}" || true
 
 for pool_name in "${BRONZE_WRITE_POOLS[@]}"; do
-  airflow pools set "${pool_name}" 1 "Serialize Bronze writers per dataset to prevent duplicate Kafka replay writes" || true
+  slots=1
+  description="Serialize Bronze writers per dataset to prevent duplicate Kafka replay writes"
+  if [[ "${pool_name}" == "global_backfill_worker" ]]; then
+    description="Serialize all backfill chunk processing across datasets to reduce machine load"
+  fi
+  airflow pools set "${pool_name}" "${slots}" "${description}" || true
 done
 
 # Keep pipeline DAGs paused during service bootstrap so the first scheduled run
@@ -128,12 +130,12 @@ spark-submit \
   --master "${SPARK_MASTER_URL:-spark://spark-master:7077}" \
   --conf "spark.jars.ivy=${SPARK_IVY_CACHE}" \
   --packages "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262" \
-  /workspace/spark/jobs/noop.py
+  /workspace/spark/jobs/noop.py || echo "Skipping Spark package warmup after dependency resolution failure" >&2
 spark-submit \
   --master "${SPARK_MASTER_URL:-spark://spark-master:7077}" \
   --conf "spark.jars.ivy=${SPARK_IVY_CACHE}" \
   --packages "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262,org.postgresql:postgresql:42.7.3" \
-  /workspace/spark/jobs/noop.py
+  /workspace/spark/jobs/noop.py || echo "Skipping Spark package warmup after dependency resolution failure" >&2
 
 (
   for _ in $(seq 1 60); do

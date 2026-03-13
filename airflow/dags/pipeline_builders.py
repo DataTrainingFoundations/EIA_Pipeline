@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 from airflow.operators.python import PythonOperator
+from airflow.sensors.python import PythonSensor
 from airflow.sensors.external_task import ExternalTaskSensor
 
 from pipeline_constants import (
     GOLD_FUEL_FACT_HOURLY_PATH,
     GOLD_FUEL_TYPE_DIM_PATH,
     GOLD_REGION_FACT_HOURLY_PATH,
+    GLOBAL_BACKFILL_POOL,
     GOLD_RESPONDENT_DIM_PATH,
     SPARK_PACKAGES,
     SPARK_PACKAGES_WITH_POSTGRES,
 )
 from pipeline_support import (
     build_spark_submit_command,
+    has_completed_backfill,
     merge_stage_into_target,
     validate_distinct_values,
     validate_numeric_bounds,
@@ -22,6 +25,10 @@ from pipeline_support import (
 
 def bronze_write_pool(dataset_id: str) -> str:
     return f"{dataset_id}_bronze_write"
+
+
+def global_backfill_pool() -> str:
+    return GLOBAL_BACKFILL_POOL
 
 
 def build_fetch_command(dataset_id: str, start_expression: str, end_expression: str, max_pages: int) -> str:
@@ -251,4 +258,15 @@ def build_curated_gold_sensor(task_id: str, upstream_dataset_id: str) -> Externa
         mode="reschedule",
         poke_interval=60,
         timeout=60 * 60,
+    )
+
+
+def build_first_backfill_sensor(task_id: str, dataset_id: str) -> PythonSensor:
+    return PythonSensor(
+        task_id=task_id,
+        python_callable=has_completed_backfill,
+        op_kwargs={"dataset_id": dataset_id},
+        mode="reschedule",
+        poke_interval=60,
+        timeout=6 * 60 * 60,
     )

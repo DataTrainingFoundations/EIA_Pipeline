@@ -1,7 +1,7 @@
 # Airflow
 
 ## Purpose
-This folder owns orchestration: hourly incrementals, historical backfills, Bronze verification and repair, and the platinum-serving DAG schedules.
+This folder owns orchestration: hourly incrementals, historical backfills, disabled Bronze verification/repair code paths, and the platinum-serving DAG schedules.
 
 ## Important Files
 - `dags/pipeline_factories.py`: DAG registration facade.
@@ -9,7 +9,7 @@ This folder owns orchestration: hourly incrementals, historical backfills, Bronz
 - `dags/pipeline_serving_dags.py`: business-serving DAG builders.
 - `dags/pipeline_runtime.py`: registry/path/DB/Spark-submit helpers.
 - `dags/pipeline_backfill.py`: backfill queue helpers.
-- `dags/pipeline_repair.py`: Bronze repair queue helpers.
+- `dags/pipeline_repair.py`: inactive Bronze repair queue helpers kept on disk.
 - `dags/pipeline_validation.py`: merge and validation helpers.
 
 ## Add Something New
@@ -22,7 +22,7 @@ This folder owns orchestration: hourly incrementals, historical backfills, Bronz
 ## Follow This Function Next
 - Start with `pipeline_factories.register_all_dags`.
 - Then follow the specific DAG builder in `pipeline_dataset_dags.py` or `pipeline_serving_dags.py`.
-- For queue state, follow into `pipeline_backfill.py` or `pipeline_repair.py`.
+- For active queue state, follow into `pipeline_backfill.py`.
 
 ## Relevant Tests
 - `airflow/tests/test_pipeline_runtime.py`

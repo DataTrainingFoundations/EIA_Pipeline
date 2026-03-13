@@ -59,10 +59,6 @@ Dataset DAGs:
 - `electricity_region_data_backfill`
 - `electricity_fuel_type_data_incremental`
 - `electricity_fuel_type_data_backfill`
-- `electricity_region_data_bronze_hourly_verification`
-- `electricity_region_data_bronze_hourly_repair`
-- `electricity_fuel_type_data_bronze_hourly_verification`
-- `electricity_fuel_type_data_bronze_hourly_repair`
 
 Business serving DAGs:
 
@@ -72,8 +68,9 @@ Business serving DAGs:
 ## Backfill Behavior
 
 Backfill runs newest-first.
-For daily datasets it starts with yesterday and moves backward over time.
-The backfill schedule is controlled by `AIRFLOW_BACKFILL_SCHEDULE` in `.env` and defaults to `*/5 * * * *`.
+The first chunk spans the current UTC week start through the current hour boundary.
+Later chunks move backward one UTC calendar week at a time.
+Backfill is triggered after successful incrementals and also has an hourly safety schedule from `AIRFLOW_BACKFILL_SCHEDULE`, which now defaults to `5 * * * *`.
 
 ## Time and UI Notes
 
@@ -91,12 +88,14 @@ The backfill schedule is controlled by `AIRFLOW_BACKFILL_SCHEDULE` in `.env` and
 - Kafka is used as a bounded ingestion buffer, with dataset-specific topics keyed by `event_id`.
 - Bronze uses dataset-specific MinIO paths, bounded Kafka batch reads, and offset tracking in `offsets.json` rather than Kafka consumer groups.
 - Bronze is replay-safe by `event_id` and stores hourly partitions beneath each dataset path.
-- Bronze verification DAGs write hourly coverage snapshots to `ops.bronze_hourly_coverage` and enqueue repair work for missing hours.
-- Dataset and repair/backfill DAGs retry transient failures automatically, and stale in-progress backfill/repair jobs are requeued up to a capped attempt count.
+- Bronze verification and repair DAGs are currently disabled from active orchestration and remain on disk only for future reuse.
+- Incremental DAGs now seed backfill runs, and backfill execution is globally serialized to reduce machine load.
+- Backfill DAGs retry transient failures automatically, and stale in-progress backfill jobs are requeued up to a capped attempt count.
 - Fuel incremental validation no longer fails when an hourly source window legitimately returns no new valid rows.
 - Gold now materializes explicit fact datasets at `s3a://gold/facts/region_demand_forecast_hourly` and `s3a://gold/facts/fuel_generation_hourly`.
 - Gold also materializes dimensions at `s3a://gold/dimensions/respondent` and `s3a://gold/dimensions/fuel_type`.
 - Platinum marts read the Gold facts, and resource planning also uses the Gold fuel dimension for emissions metadata.
+- Platinum DAGs wait for one completed backfill chunk from both datasets before their first successful runs, then continue on hourly incremental curated-gold dependencies.
 - Silver and Gold remain day-partitioned by design.
 - Backfill operations should use normal scheduling or `airflow dags trigger`, not `airflow dags test`.
 
@@ -105,14 +104,6 @@ The backfill schedule is controlled by `AIRFLOW_BACKFILL_SCHEDULE` in `.env` and
 `docker compose exec -T airflow airflow dags list-runs -d electricity_region_data_backfill --no-backfill`
 
 `docker compose exec -T airflow airflow dags list-runs -d electricity_fuel_type_data_backfill --no-backfill`
-
-`docker compose exec -T airflow airflow dags list-runs -d electricity_region_data_bronze_hourly_verification --no-backfill`
-
-`docker compose exec -T airflow airflow dags list-runs -d electricity_region_data_bronze_hourly_repair --no-backfill`
-
-`docker compose exec -T airflow airflow dags list-runs -d electricity_fuel_type_data_bronze_hourly_verification --no-backfill`
-
-`docker compose exec -T airflow airflow dags list-runs -d electricity_fuel_type_data_bronze_hourly_repair --no-backfill`
 
 `docker compose exec -T airflow airflow dags list-runs -d platinum_grid_operations_hourly --no-backfill`
 

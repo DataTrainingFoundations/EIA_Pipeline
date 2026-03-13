@@ -2,3 +2,5 @@ pipeline_builders.py
 pipeline_constants.py
 pipeline_factories.py
 pipeline_support.py
+.*_bronze_hourly_verification\.py
+.*_bronze_hourly_repair\.py

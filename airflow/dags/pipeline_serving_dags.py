@@ -9,6 +9,7 @@ from airflow import DAG
 from airflow.operators.bash import BashOperator
 
 from pipeline_builders import (
+    build_first_backfill_sensor,
     build_curated_gold_sensor,
     build_merge_task,
     build_validate_bounds_task,
@@ -48,6 +49,8 @@ def build_grid_operations_dag() -> DAG:
         alert_stage_table = "platinum.grid_operations_alert_hourly_stage_{{ ts_nodash | lower }}"
         lookback_start_expr = "{{ (data_interval_end.in_timezone('UTC') - macros.timedelta(days=14)).isoformat() }}"
         end_expr = "{{ data_interval_end.in_timezone('UTC').isoformat() }}"
+        wait_for_region_first_backfill = build_first_backfill_sensor("wait_for_region_first_backfill", "electricity_region_data")
+        wait_for_fuel_first_backfill = build_first_backfill_sensor("wait_for_fuel_first_backfill", "electricity_fuel_type_data")
         wait_for_region_gold = build_curated_gold_sensor("wait_for_region_curated_gold", "electricity_region_data")
         wait_for_fuel_gold = build_curated_gold_sensor("wait_for_fuel_curated_gold", "electricity_fuel_type_data")
 
@@ -124,6 +127,8 @@ def build_grid_operations_dag() -> DAG:
             allow_empty_result=True,
         )
 
+        wait_for_region_first_backfill >> wait_for_fuel_first_backfill >> wait_for_region_gold
+        wait_for_fuel_first_backfill >> wait_for_fuel_gold
         [wait_for_region_gold, wait_for_fuel_gold] >> build_stage
         build_stage >> validate_stage_rows >> merge_status >> merge_alerts >> validate_rows >> validate_respondents >> validate_coverage_ratio >> validate_renewable_share
 
@@ -147,6 +152,8 @@ def build_resource_planning_dag() -> DAG:
         lookback_start_expr = "{{ (data_interval_end.in_timezone('UTC') - macros.timedelta(days=35)).isoformat() }}"
         end_expr = "{{ data_interval_end.in_timezone('UTC').isoformat() }}"
         recent_where = "date >= current_date - interval '35 days'"
+        wait_for_region_first_backfill = build_first_backfill_sensor("wait_for_region_first_backfill", "electricity_region_data")
+        wait_for_fuel_first_backfill = build_first_backfill_sensor("wait_for_fuel_first_backfill", "electricity_fuel_type_data")
         wait_for_region_gold = build_curated_gold_sensor("wait_for_region_curated_gold", "electricity_region_data")
         wait_for_fuel_gold = build_curated_gold_sensor("wait_for_fuel_curated_gold", "electricity_fuel_type_data")
 
@@ -215,6 +222,8 @@ def build_resource_planning_dag() -> DAG:
             allow_empty_result=True,
         )
 
+        wait_for_region_first_backfill >> wait_for_fuel_first_backfill >> wait_for_region_gold
+        wait_for_fuel_first_backfill >> wait_for_fuel_gold
         [wait_for_region_gold, wait_for_fuel_gold] >> build_stage
         build_stage >> validate_stage_rows >> merge >> validate_rows >> validate_respondents >> validate_renewable_share >> validate_carbon_intensity
 

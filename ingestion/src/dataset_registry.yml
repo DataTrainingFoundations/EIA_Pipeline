@@ -32,3 +32,18 @@ datasets:
       start: "2020-01-01T00:00:00+00:00"
       step: day
       max_pending_chunks: 14
+  - id: electricity_interchange_data
+    route: electricity/rto/interchange-data
+    topic: electricity_interchange_data
+    frequency: hourly
+    default_lag_hours: 26
+    data_columns:
+      - value
+    bronze_output_path: s3a://bronze/electricity_interchange_data
+    bronze_checkpoint_path: s3a://bronze/checkpoints/electricity_interchange_data
+    silver_output_path: s3a://silver/interchange_data
+    gold_output_path: s3a://gold/facts/interchange_hourly
+    backfill:
+      start: "2020-01-01T00:00:00+00:00"
+      step: day
+      max_pending_chunks: 14

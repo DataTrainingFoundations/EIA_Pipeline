@@ -124,6 +124,7 @@ REGION_DATASET = {
     "bronze_output_path": "s3a://bronze/region",
     "bronze_checkpoint_path": "s3a://bronze/checkpoints/region",
     "platinum_table": "platinum.region_demand_daily",
+    "incremental_schedule": "@hourly",
 }
 
 FUEL_DATASET = {
@@ -131,6 +132,7 @@ FUEL_DATASET = {
     "topic": "eia_electricity_fuel_type_data",
     "bronze_output_path": "s3a://bronze/fuel",
     "bronze_checkpoint_path": "s3a://bronze/checkpoints/fuel",
+    "incremental_schedule": "20 18 * * *",
 }
 
 
@@ -176,6 +178,8 @@ def test_dataset_dag_builders_include_expected_tasks_for_region_and_fuel(monkeyp
     incremental_region = pipeline_dataset_dags.build_incremental_dag("electricity_region_data", REGION_DATASET)
     incremental_fuel = pipeline_dataset_dags.build_incremental_dag("electricity_fuel_type_data", FUEL_DATASET)
     backfill_region = pipeline_dataset_dags.build_backfill_dag("electricity_region_data", REGION_DATASET)
+    assert incremental_region.kwargs["schedule"] == "@hourly"
+    assert incremental_fuel.kwargs["schedule"] == "20 18 * * *"
     assert "spark_platinum_stage" in incremental_region.task_dict
     assert "spark_platinum_stage" not in incremental_fuel.task_dict
     assert incremental_region.get_task("spark_curated_gold_batch").downstream_task_ids == {"spark_platinum_stage"}

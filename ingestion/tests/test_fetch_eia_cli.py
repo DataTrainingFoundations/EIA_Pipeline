@@ -38,6 +38,7 @@ def test_parse_args_and_select_datasets(monkeypatch) -> None:  # noqa: ANN001
     assert args.dataset == "electricity_region_data"
     assert args.respondent == "PJM"
     assert args.dry_run is True
+    assert "[start, end)" in fetch_eia.parse_args.__doc__
     assert [dataset["id"] for dataset in selected] == ["electricity_region_data", "electricity_fuel_type_data"]
 
     with pytest.raises(ValueError, match="Unknown dataset"):
@@ -88,6 +89,7 @@ def test_main_dry_run_builds_events_without_publishing(monkeypatch) -> None:  # 
 
     assert built_events[0]["dataset_id"] == "electricity_region_data"
     assert built_events[0]["source_window_start"] == "2026-03-10T00"
+    assert built_events[0]["source_window_end"] == "2026-03-10T02"
     assert published == []
 
 

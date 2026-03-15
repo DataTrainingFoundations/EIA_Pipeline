@@ -169,6 +169,13 @@ def test_read_partitioned_parquet_preserves_partition_columns(spark_session, tmp
     assert row["event_date"] == expected_date
 
 
+def test_read_parquet_if_exists_returns_none_for_empty_existing_directory(spark_session, tmp_path) -> None:
+    empty_dir = tmp_path / "empty_parquet_dir"
+    empty_dir.mkdir()
+
+    assert spark_io.read_parquet_if_exists(spark_session, str(empty_dir)) is None
+
+
 def test_build_spark_session_configures_expected_defaults(monkeypatch) -> None:  # noqa: ANN001
     builder = FakeBuilder()
     monkeypatch.setattr("common.spark_session.SparkSession.builder", builder, raising=False)

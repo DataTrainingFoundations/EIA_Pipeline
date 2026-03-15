@@ -85,7 +85,7 @@ def test_region_hourly_metrics_aggregates_by_period_and_respondent(spark_session
     assert rows[0]["day_ahead_forecast_mwh"] == 125.0
 
 
-def test_region_hourly_metrics_rejects_conflicting_duplicates(spark_session) -> None:
+def test_region_hourly_metrics_prefers_latest_loaded_conflicting_duplicate(spark_session) -> None:
     region_df = spark_session.createDataFrame(
         [
             {
@@ -113,8 +113,11 @@ def test_region_hourly_metrics_rejects_conflicting_duplicates(spark_session) -> 
         ]
     )
 
-    with pytest.raises(ValueError, match="conflicting records"):
-        build_region_hourly_metrics(region_df)
+    gold_df = build_region_hourly_metrics(region_df)
+    rows = gold_df.collect()
+
+    assert len(rows) == 1
+    assert rows[0]["actual_demand_mwh"] == 120.0
 
 
 def test_respondent_dimension_rolls_up_current_and_historical_names(spark_session, tmp_path) -> None:

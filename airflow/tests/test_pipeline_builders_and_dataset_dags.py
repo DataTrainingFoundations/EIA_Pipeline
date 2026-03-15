@@ -206,13 +206,11 @@ def test_serving_dag_builders_include_validation_chain(monkeypatch) -> None:  # 
     planning_dag = pipeline_serving_dags.build_resource_planning_dag()
 
     assert grid_dag.get_task("wait_for_region_first_backfill").upstream_task_ids == set()
-    assert grid_dag.get_task("wait_for_fuel_first_backfill").upstream_task_ids == {"wait_for_region_first_backfill"}
+    assert grid_dag.get_task("wait_for_fuel_first_backfill").upstream_task_ids == set()
     assert grid_dag.get_task("build_grid_operations_hourly_stage").upstream_task_ids == {
-        "wait_for_region_curated_gold",
-        "wait_for_fuel_curated_gold",
+        "wait_for_region_first_backfill",
+        "wait_for_fuel_first_backfill",
     }
-    assert grid_dag.get_task("wait_for_region_curated_gold").upstream_task_ids == {"wait_for_fuel_first_backfill"}
-    assert grid_dag.get_task("wait_for_fuel_curated_gold").upstream_task_ids == {"wait_for_fuel_first_backfill"}
     assert grid_dag.get_task("validate_grid_operations_renewable_share").upstream_task_ids == {"validate_grid_operations_coverage_ratio"}
     assert grid_dag.get_task("validate_grid_operations_rows").op_kwargs["allow_empty_result"] is True
     assert grid_dag.get_task("validate_grid_operations_respondents").op_kwargs["allow_empty_result"] is True
@@ -221,7 +219,11 @@ def test_serving_dag_builders_include_validation_chain(monkeypatch) -> None:  # 
     assert planning_dag.get_task("validate_resource_planning_carbon_intensity").upstream_task_ids == {
         "validate_resource_planning_renewable_share"
     }
-    assert planning_dag.get_task("wait_for_fuel_first_backfill").upstream_task_ids == {"wait_for_region_first_backfill"}
+    assert planning_dag.get_task("wait_for_fuel_first_backfill").upstream_task_ids == set()
+    assert planning_dag.get_task("build_resource_planning_daily_stage").upstream_task_ids == {
+        "wait_for_region_first_backfill",
+        "wait_for_fuel_first_backfill",
+    }
     assert planning_dag.get_task("validate_resource_planning_rows").op_kwargs["allow_empty_result"] is True
     assert planning_dag.get_task("validate_resource_planning_respondents").op_kwargs["allow_empty_result"] is True
     assert planning_dag.get_task("validate_resource_planning_renewable_share").op_kwargs["allow_empty_result"] is True

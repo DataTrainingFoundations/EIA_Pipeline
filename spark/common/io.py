@@ -45,6 +45,11 @@ def _is_retryable_missing_file_error(exc: Exception) -> bool:
     return "FileNotFoundException" in message or "No such file or directory" in message
 
 
+def _is_empty_parquet_schema_error(exc: Exception) -> bool:
+    message = str(exc)
+    return "UNABLE_TO_INFER_SCHEMA" in message or "Unable to infer schema for Parquet" in message
+
+
 def _read_with_retries(loader, *, retries: int, retry_delay_seconds: float):  # noqa: ANN001, ANN202
     attempts = retries + 1
     last_error: Exception | None = None
@@ -94,11 +99,16 @@ def read_parquet_if_exists(
 
     if not path_exists(spark, path_str):
         return None
-    return _read_with_retries(
-        lambda: spark.read.parquet(path_str),
-        retries=retries,
-        retry_delay_seconds=retry_delay_seconds,
-    )
+    try:
+        return _read_with_retries(
+            lambda: spark.read.parquet(path_str),
+            retries=retries,
+            retry_delay_seconds=retry_delay_seconds,
+        )
+    except Exception as exc:  # pragma: no cover - Spark raises environment-specific wrappers
+        if _is_empty_parquet_schema_error(exc):
+            return None
+        raise
 
 
 def write_partitioned_parquet(df: DataFrame, output_path: str, partition_column: str = "event_date") -> None:

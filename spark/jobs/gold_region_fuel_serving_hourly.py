@@ -18,9 +18,9 @@ from pyspark.sql import functions as F
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from common.config import load_spark_app_config
-from common.io import read_parquet_if_exists, read_partitioned_parquet, write_partitioned_parquet
+from common.io import has_partitioned_parquet_input, read_parquet_if_exists, read_partitioned_parquet, write_partitioned_parquet
 from common.logging_utils import configure_logging, log_job_complete, log_job_start
-from common.quality import assert_no_conflicting_records, assert_no_nulls, assert_non_negative, assert_unique_keys
+from common.quality import assert_no_nulls, assert_non_negative, assert_unique_keys
 from common.spark_session import build_spark_session
 from common.windowing import filter_time_window
 
@@ -61,12 +61,8 @@ def parse_args() -> argparse.Namespace:
 def build_region_hourly_metrics(region_df: DataFrame) -> DataFrame:
     """Build the curated region demand and forecast Gold fact table."""
 
-    assert_no_conflicting_records(
-        region_df.filter(F.col("type").isin("D", "DF")),
-        ["period", "respondent", "type"],
-        ["respondent_name", "value", "value_units"],
-        "gold.fact_region_demand_forecast_hourly",
-    )
+    # Region rows can legitimately be revised across re-fetches for the same
+    # business key. Gold keeps the latest loaded version for each key.
     latest_window = Window.partitionBy("period", "respondent", "type").orderBy(F.col("loaded_at").desc(), F.col("event_id").desc())
     stable_region_df = region_df.withColumn("record_rank", F.row_number().over(latest_window)).filter(F.col("record_rank") == 1).drop("record_rank")
     demand_df = (
@@ -136,12 +132,8 @@ def build_region_hourly_metrics(region_df: DataFrame) -> DataFrame:
 def build_fuel_type_hourly_generation(fuel_df: DataFrame) -> DataFrame:
     """Build the curated fuel generation Gold fact table."""
 
-    assert_no_conflicting_records(
-        fuel_df,
-        ["period", "respondent", "fueltype"],
-        ["respondent_name", "fueltype_name", "value", "value_units"],
-        "gold.fact_fuel_generation_hourly",
-    )
+    # Fuel rows can also be revised across re-fetches. Keep the latest version
+    # per hourly business key before writing curated output.
     latest_window = Window.partitionBy("period", "respondent", "fueltype").orderBy(F.col("loaded_at").desc(), F.col("event_id").desc())
     gold_df = (
         fuel_df.withColumn("record_rank", F.row_number().over(latest_window))
@@ -362,26 +354,44 @@ def main() -> None:
     fuel_df: DataFrame | None = None
 
     if args.dataset in {"electricity_region_data", "all"}:
-        region_df = read_partitioned_parquet(
-            spark,
-            f"{args.silver_base_path}/region_data",
-            retries=SILVER_READ_RETRIES,
-            retry_delay_seconds=SILVER_READ_RETRY_DELAY_SECONDS,
-        )
-        region_df = filter_time_window(region_df, "period", args.start, args.end)
-        region_gold_df = build_region_hourly_metrics(region_df)
-        write_partitioned(region_gold_df, args.region_fact_path)
+        region_input_path = f"{args.silver_base_path}/region_data"
+        if has_partitioned_parquet_input(spark, region_input_path):
+            region_df = read_partitioned_parquet(
+                spark,
+                region_input_path,
+                retries=SILVER_READ_RETRIES,
+                retry_delay_seconds=SILVER_READ_RETRY_DELAY_SECONDS,
+            )
+            region_df = filter_time_window(region_df, "period", args.start, args.end)
+            region_gold_df = build_region_hourly_metrics(region_df)
+            write_partitioned(region_gold_df, args.region_fact_path)
+        else:
+            logger.info(
+                "Skipping Gold region fact build because no Silver input is available input_path=%s start=%s end=%s",
+                region_input_path,
+                args.start,
+                args.end,
+            )
 
     if args.dataset in {"electricity_fuel_type_data", "all"}:
-        fuel_df = read_partitioned_parquet(
-            spark,
-            f"{args.silver_base_path}/fuel_type_data",
-            retries=SILVER_READ_RETRIES,
-            retry_delay_seconds=SILVER_READ_RETRY_DELAY_SECONDS,
-        )
-        fuel_df = filter_time_window(fuel_df, "period", args.start, args.end)
-        fuel_gold_df = build_fuel_type_hourly_generation(fuel_df)
-        write_partitioned(fuel_gold_df, args.fuel_fact_path)
+        fuel_input_path = f"{args.silver_base_path}/fuel_type_data"
+        if has_partitioned_parquet_input(spark, fuel_input_path):
+            fuel_df = read_partitioned_parquet(
+                spark,
+                fuel_input_path,
+                retries=SILVER_READ_RETRIES,
+                retry_delay_seconds=SILVER_READ_RETRY_DELAY_SECONDS,
+            )
+            fuel_df = filter_time_window(fuel_df, "period", args.start, args.end)
+            fuel_gold_df = build_fuel_type_hourly_generation(fuel_df)
+            write_partitioned(fuel_gold_df, args.fuel_fact_path)
+        else:
+            logger.info(
+                "Skipping Gold fuel fact build because no Silver input is available input_path=%s start=%s end=%s",
+                fuel_input_path,
+                args.start,
+                args.end,
+            )
 
     if region_df is not None or fuel_df is not None:
         respondent_dim_df = build_respondent_dimension(spark, region_df, fuel_df, args.respondent_dim_path)

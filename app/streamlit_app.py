@@ -15,7 +15,7 @@ st.caption(
     "Action-focused business dashboards for near-term operations and resource planning decisions."
 )
 
-# Database connection check
+# Database connection
 try:
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -26,12 +26,9 @@ except Exception as exc:  # pragma: no cover
     st.error(f"Database connection failed: {exc}")
     st.stop()
 
-# --- Create tabs ---
 tabs = st.tabs(["Grid Operations Manager", "Utility Strategy Director", "Resource Planning Lead"])
 
-# -----------------------------
 # GRID OPERATIONS MANAGER TAB
-# -----------------------------
 with tabs[0]:
     st.subheader("Grid Operations Manager")
     st.markdown(
@@ -46,7 +43,6 @@ with tabs[0]:
     else:
         st.caption("Use the sidebar to open Grid Operations Manager.")
 
-    # Data coverage & freshness
     col1, col2, col3 = st.columns(3)
     if table_has_rows():
         coverage = get_summary_coverage()
@@ -63,9 +59,7 @@ with tabs[0]:
             f"**Ops Hourly Coverage**  \n{ops_coverage['min_period']}  \nto  \n{ops_coverage['max_period']}"
         )
 
-# -----------------------------
 # UTILITY STRATEGY DIRECTOR TAB
-# -----------------------------
 with tabs[1]:
     st.subheader("Utility Strategy Director")
     st.markdown(
@@ -80,9 +74,8 @@ with tabs[1]:
     else:
         st.caption("Use the sidebar to open Utility Strategy Director.")
 
-# -----------------------------
+
 # RESOURCE PLANNING LEAD TAB
-# -----------------------------
 with tabs[2]:
     st.subheader("Resource Planning Lead")
     st.markdown(
@@ -105,9 +98,6 @@ with tabs[2]:
             f"**Planning Daily Coverage**  \n{planning_coverage['min_date']}  \nto  \n{planning_coverage['max_date']}"
         )
 
-# -----------------------------
-# Operational Status (Common)
-# -----------------------------
 st.subheader("Operational Status")
 with st.expander("Backfill Status", expanded=False):
     status_df = get_backfill_status()

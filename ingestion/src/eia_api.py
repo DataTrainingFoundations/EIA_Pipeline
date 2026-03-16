@@ -7,6 +7,7 @@ into Kafka events.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import requests
@@ -23,6 +24,30 @@ def _apply_facets(params: dict[str, Any], facets: dict[str, list[str]] | None) -
         params[f"facets[{facet_name}][]"] = facet_values
 
 
+def _parse_cli_hour(value: str) -> datetime:
+    """Parse an ingestion CLI hour boundary and normalize it to UTC."""
+
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def resolve_api_window_bounds(start: str, end: str, frequency: str = "hourly") -> tuple[str, str]:
+    """Translate the pipeline's [start, end) window into EIA API parameters."""
+
+    start_dt = _parse_cli_hour(start)
+    end_dt = _parse_cli_hour(end)
+    if end_dt <= start_dt:
+        raise ValueError(f"Invalid source window: end must be greater than start (start={start}, end={end})")
+
+    if frequency == "hourly":
+        api_end = end_dt - timedelta(hours=1)
+        return start_dt.strftime("%Y-%m-%dT%H"), api_end.strftime("%Y-%m-%dT%H")
+
+    return start, end
+
+
 def build_eia_query_params(
     api_key: str,
     start: str,
@@ -37,8 +62,8 @@ def build_eia_query_params(
 
     Args:
         api_key: API key used to call EIA v2.
-        start: Inclusive start of the source window.
-        end: Inclusive end of the source window.
+        start: Inclusive start of the translated EIA API request window.
+        end: Inclusive end of the translated EIA API request window.
         offset: Row offset for pagination.
         length: Maximum rows to request for this page.
         default_facets: Dataset-specific filters from the registry.
@@ -84,8 +109,8 @@ def fetch_dataset_rows(
     Args:
         api_key: EIA API key.
         dataset_config: One dataset entry from `dataset_registry.yml`.
-        start: Inclusive source-window start.
-        end: Inclusive source-window end.
+        start: Inclusive pipeline source-window start.
+        end: Exclusive pipeline source-window end.
         page_size: Max rows per API page.
         max_pages: Hard stop to prevent unbounded paging.
         timeout_seconds: Per-request timeout.
@@ -101,6 +126,7 @@ def fetch_dataset_rows(
 
     route = dataset_config["route"]
     query_url = f"{EIA_API_BASE_URL}/{route}/data/"
+    api_start, api_end = resolve_api_window_bounds(start, end, dataset_config.get("frequency", "hourly"))
     offset = 0
     all_rows: list[dict[str, Any]] = []
     page_count = 0
@@ -110,8 +136,8 @@ def fetch_dataset_rows(
     while page_count < max_pages:
         params = build_eia_query_params(
             api_key=api_key,
-            start=start,
-            end=end,
+            start=api_start,
+            end=api_end,
             offset=offset,
             length=page_size,
             default_facets=dataset_config.get("default_facets"),

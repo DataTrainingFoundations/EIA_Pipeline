@@ -55,16 +55,17 @@ BACKFILL_DEFAULT_ARGS = {"retries": 1, "retry_delay": timedelta(minutes=5)}
 
 
 def build_incremental_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
-    """Build the hourly dataset DAG from ingestion through optional serving."""
+    """Build the dataset incremental DAG from ingestion through optional serving."""
 
     dag_id = f"{dataset_id}_incremental"
     has_serving = dataset_id == "electricity_region_data" and bool(dataset.get("platinum_table"))
     has_curated_gold = dataset_id in {"electricity_region_data", "electricity_fuel_type_data"}
+    incremental_schedule = dataset.get("incremental_schedule", "@hourly")
 
     with DAG(
         dag_id=dag_id,
         start_date=datetime(2024, 1, 1),
-        schedule="@hourly",
+        schedule=incremental_schedule,
         catchup=False,
         is_paused_upon_creation=True,
         max_active_runs=1,

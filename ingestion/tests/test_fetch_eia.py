@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from src.eia_api import build_eia_query_params, fetch_dataset_rows
+from src.eia_api import build_eia_query_params, fetch_dataset_rows, resolve_api_window_bounds
 from src.event_factory import build_event, build_event_id
 from src.registry import load_dataset_registry, validate_dataset_registry
 
@@ -66,6 +66,15 @@ def test_build_query_params_applies_facets() -> None:
     assert params["sort[0][column]"] == "period"
 
 
+def test_resolve_api_window_bounds_converts_exclusive_hourly_end() -> None:
+    assert resolve_api_window_bounds("2026-03-15T14", "2026-03-15T15") == ("2026-03-15T14", "2026-03-15T14")
+
+
+def test_resolve_api_window_bounds_rejects_empty_or_negative_window() -> None:
+    with pytest.raises(ValueError, match="end must be greater than start"):
+        resolve_api_window_bounds("2026-03-15T14", "2026-03-15T14")
+
+
 def test_fetch_dataset_rows_paginates_until_total() -> None:
     session = FakeSession(
         responses=[
@@ -90,6 +99,7 @@ def test_fetch_dataset_rows_paginates_until_total() -> None:
     assert len(session.calls) == 2
     assert session.calls[1]["params"]["offset"] == 2
     assert session.calls[0]["params"]["data[0]"] == "value"
+    assert session.calls[0]["params"]["end"] == "2026-01-01T01"
 
 
 def test_fetch_dataset_rows_stops_when_page_is_short_without_total() -> None:

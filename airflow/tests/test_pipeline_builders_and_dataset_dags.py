@@ -124,6 +124,7 @@ REGION_DATASET = {
     "bronze_output_path": "s3a://bronze/region",
     "bronze_checkpoint_path": "s3a://bronze/checkpoints/region",
     "platinum_table": "platinum.region_demand_daily",
+    "incremental_schedule": "@hourly",
 }
 
 FUEL_DATASET = {
@@ -131,6 +132,7 @@ FUEL_DATASET = {
     "topic": "eia_electricity_fuel_type_data",
     "bronze_output_path": "s3a://bronze/fuel",
     "bronze_checkpoint_path": "s3a://bronze/checkpoints/fuel",
+    "incremental_schedule": "20 18 * * *",
 }
 
 
@@ -176,6 +178,8 @@ def test_dataset_dag_builders_include_expected_tasks_for_region_and_fuel(monkeyp
     incremental_region = pipeline_dataset_dags.build_incremental_dag("electricity_region_data", REGION_DATASET)
     incremental_fuel = pipeline_dataset_dags.build_incremental_dag("electricity_fuel_type_data", FUEL_DATASET)
     backfill_region = pipeline_dataset_dags.build_backfill_dag("electricity_region_data", REGION_DATASET)
+    assert incremental_region.kwargs["schedule"] == "@hourly"
+    assert incremental_fuel.kwargs["schedule"] == "20 18 * * *"
     assert "spark_platinum_stage" in incremental_region.task_dict
     assert "spark_platinum_stage" not in incremental_fuel.task_dict
     assert incremental_region.get_task("spark_curated_gold_batch").downstream_task_ids == {"spark_platinum_stage"}
@@ -206,13 +210,11 @@ def test_serving_dag_builders_include_validation_chain(monkeypatch) -> None:  # 
     planning_dag = pipeline_serving_dags.build_resource_planning_dag()
 
     assert grid_dag.get_task("wait_for_region_first_backfill").upstream_task_ids == set()
-    assert grid_dag.get_task("wait_for_fuel_first_backfill").upstream_task_ids == {"wait_for_region_first_backfill"}
+    assert grid_dag.get_task("wait_for_fuel_first_backfill").upstream_task_ids == set()
     assert grid_dag.get_task("build_grid_operations_hourly_stage").upstream_task_ids == {
-        "wait_for_region_curated_gold",
-        "wait_for_fuel_curated_gold",
+        "wait_for_region_first_backfill",
+        "wait_for_fuel_first_backfill",
     }
-    assert grid_dag.get_task("wait_for_region_curated_gold").upstream_task_ids == {"wait_for_fuel_first_backfill"}
-    assert grid_dag.get_task("wait_for_fuel_curated_gold").upstream_task_ids == {"wait_for_fuel_first_backfill"}
     assert grid_dag.get_task("validate_grid_operations_renewable_share").upstream_task_ids == {"validate_grid_operations_coverage_ratio"}
     assert grid_dag.get_task("validate_grid_operations_rows").op_kwargs["allow_empty_result"] is True
     assert grid_dag.get_task("validate_grid_operations_respondents").op_kwargs["allow_empty_result"] is True
@@ -221,7 +223,11 @@ def test_serving_dag_builders_include_validation_chain(monkeypatch) -> None:  # 
     assert planning_dag.get_task("validate_resource_planning_carbon_intensity").upstream_task_ids == {
         "validate_resource_planning_renewable_share"
     }
-    assert planning_dag.get_task("wait_for_fuel_first_backfill").upstream_task_ids == {"wait_for_region_first_backfill"}
+    assert planning_dag.get_task("wait_for_fuel_first_backfill").upstream_task_ids == set()
+    assert planning_dag.get_task("build_resource_planning_daily_stage").upstream_task_ids == {
+        "wait_for_region_first_backfill",
+        "wait_for_fuel_first_backfill",
+    }
     assert planning_dag.get_task("validate_resource_planning_rows").op_kwargs["allow_empty_result"] is True
     assert planning_dag.get_task("validate_resource_planning_respondents").op_kwargs["allow_empty_result"] is True
     assert planning_dag.get_task("validate_resource_planning_renewable_share").op_kwargs["allow_empty_result"] is True

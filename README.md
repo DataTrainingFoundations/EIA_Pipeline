@@ -90,6 +90,7 @@ Backfill is triggered after successful incrementals and also has an hourly safet
 - Bronze is replay-safe by `event_id` and stores hourly partitions beneath each dataset path.
 - Bronze verification and repair DAGs are currently disabled from active orchestration and remain on disk only for future reuse.
 - Incremental DAGs now seed backfill runs, and backfill execution is globally serialized to reduce machine load.
+- `electricity_region_data_incremental` remains hourly, while `electricity_fuel_type_data_incremental` now runs daily at `18:20 UTC` because the fuel source can lag well behind the current hour.
 - Backfill DAGs retry transient failures automatically, and stale in-progress backfill jobs are requeued up to a capped attempt count.
 - Fuel incremental validation no longer fails when an hourly source window legitimately returns no new valid rows.
 - Gold now materializes explicit fact datasets at `s3a://gold/facts/region_demand_forecast_hourly` and `s3a://gold/facts/fuel_generation_hourly`.
@@ -98,6 +99,13 @@ Backfill is triggered after successful incrementals and also has an hourly safet
 - Platinum DAGs wait for one completed backfill chunk from both datasets before their first successful runs, then continue on hourly incremental curated-gold dependencies.
 - Silver and Gold remain day-partitioned by design.
 - Backfill operations should use normal scheduling or `airflow dags trigger`, not `airflow dags test`.
+
+## Windowing and Bronze Notes
+
+- Ingestion fetch windows now follow `[start, end)` semantics. Airflow and Spark pass an exclusive `end`, and the ingestion layer translates that into the inclusive EIA API boundary internally.
+- Bronze counts can differ from a current API snapshot for two reasons:
+  - a prior boundary-hour over-fetch bug, now fixed by the ingestion window translation
+  - intentional append-only retention of revised EIA rows by `event_id`, which remains unchanged
 
 ## Useful Checks
 

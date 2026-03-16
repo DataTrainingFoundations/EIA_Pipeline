@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 from airflow_store import AirflowStore, expected_lag_for_dag, extract_error_excerpt
 from config import AppConfig
@@ -47,6 +48,8 @@ def test_extract_error_excerpt_and_read_task_log(tmp_path: Path) -> None:
 
 
 def test_expected_lag_and_fallback_excerpt() -> None:
+    assert expected_lag_for_dag("electricity_fuel_type_data_incremental") == timedelta(hours=26)
+    assert expected_lag_for_dag("electricity_region_data_incremental") == timedelta(hours=2)
     assert expected_lag_for_dag("electricity_region_data_backfill").seconds == 1200
     excerpt = extract_error_excerpt("line1\nline2\nline3")
     assert excerpt == "line1\nline2\nline3"

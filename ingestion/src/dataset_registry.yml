@@ -3,6 +3,7 @@ datasets:
     route: electricity/rto/region-data
     topic: eia_electricity_region_data
     frequency: hourly
+    incremental_schedule: "@hourly"
     data_columns:
       - value
     default_facets:
@@ -22,6 +23,7 @@ datasets:
     route: electricity/rto/fuel-type-data
     topic: eia_electricity_fuel_type_data
     frequency: hourly
+    incremental_schedule: "20 18 * * *"
     data_columns:
       - value
     bronze_output_path: s3a://bronze/electricity_fuel_type_data

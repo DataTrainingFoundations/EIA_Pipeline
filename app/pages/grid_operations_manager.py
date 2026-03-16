@@ -118,7 +118,7 @@ def _priority_badge(label: str) -> str:
 
 
 def _color_priority(val: str) -> str:
-    colors = {"Critical": "#fde8e8", "Elevated": "#fef3e2", "Stable": "#e6f5ef"}
+    colors = {"Critical": "#E24B4A", "Elevated": "#EF9F27", "Stable": "#1D9E75"}
     return f"background-color: {colors.get(val, '')}"
 
 

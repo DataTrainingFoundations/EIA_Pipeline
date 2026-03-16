@@ -139,10 +139,6 @@ def build_spark_submit_command(
         f"spark.cores.max={SPARK_SUBMIT_TOTAL_CORES}",
         "--conf",
         f"spark.executor.cores={SPARK_SUBMIT_EXECUTOR_CORES}",
-        "--conf",
-        "mapreduce.fileoutputcommitter.algorithm.version=2",
-        "--conf", 
-        "spark.hadoop.mapreduce.fileoutputcommitter.algorithm.version=2",
     ]
     if job_name:
         command.extend(["--name", job_name])

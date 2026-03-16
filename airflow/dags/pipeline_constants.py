@@ -97,6 +97,27 @@ RESOURCE_PLANNING_COLUMNS = [
     "updated_at",
 ]
 
+POWER_OPERATIONS_MONTHLY_COLUMNS = [
+    "period",
+    "location",
+    "location_name",
+    "sector_id",
+    "sector_name",
+    "fueltype_id",
+    "fueltype_name",
+    "generation_mwh",
+    "generation_share_pct",
+    "consumption_for_eg_thousand_units",
+    "ash_content_pct",
+    "heat_content_btu_per_unit",
+    "fuel_heat_input_mmbtu",
+    "heat_rate_btu_per_kwh",
+    "loaded_at",
+    "source_window_start",
+    "source_window_end",
+    "updated_at",
+]
+
 BRONZE_HOURLY_COVERAGE_COLUMNS = [
     "dataset_id",
     "hour_start_utc",

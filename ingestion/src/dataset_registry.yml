@@ -54,6 +54,7 @@ datasets:
     bronze_checkpoint_path: s3a://bronze/checkpoints/electricity_power_operational_data
     silver_output_path: s3a://silver/electric_power_operational_data
     gold_output_path: s3a://gold/facts/electric_power_operations_monthly
+    platinum_table: platinum.electric_power_operations_monthly
 
     backfill:
       start: "2010-01-01T00:00:00+00:00"

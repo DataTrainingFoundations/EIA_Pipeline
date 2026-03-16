@@ -99,6 +99,12 @@ datasets:
     topic: eia_electricity_fuel_type_data
     bronze_output_path: s3a://bronze/fuel
     silver_output_path: s3a://silver/fuel
+  - id: electricity_power_operational_data
+    route: electricity/electric-power-operational-data
+    topic: eia_electricity_power_operational_data
+    bronze_output_path: s3a://bronze/power
+    silver_output_path: s3a://silver/power
+    gold_output_path: s3a://gold/power
 """.strip(),
         encoding="utf-8",
     )
@@ -129,6 +135,7 @@ def test_warehouse_read_sql_and_platform_counts(monkeypatch, tmp_path: Path) -> 
     assert df.to_dict("records") == [{"target_name": "platinum.region_demand_daily", "row_count": 12}]
     assert cursor.executed[0][1] == (9,)
     assert "platinum.grid_operations_hourly" in captured["query"]
+    assert "platinum.electric_power_operations_monthly" in captured["query"]
 
 
 def test_fetch_platinum_keys_builds_grain_keys_and_filters_respondent(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
@@ -171,3 +178,33 @@ def test_fetch_platinum_keys_builds_grain_keys_and_filters_respondent(monkeypatc
     assert captured["params"] == [request.start_utc, request.end_utc, "PJM"]
     assert result.iloc[0]["grain_key"] == "2026-03-10T00:00:00Z|PJM|"
     assert empty.empty is True
+
+
+def test_fetch_power_platinum_keys_builds_dimension_key(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    store = WarehouseStore(_app_config(tmp_path))
+    request = ComparisonRequest(
+        dataset_id="platinum.electric_power_operations_monthly",
+        stage="platinum",
+        start_utc=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        end_utc=datetime(2026, 2, 1, tzinfo=timezone.utc),
+        respondent_filter="US",
+    )
+
+    def fake_read_sql(query, params=None):  # noqa: ANN001
+        assert "platinum.electric_power_operations_monthly" in query
+        assert params == [request.start_utc, request.end_utc, "US"]
+        return pd.DataFrame(
+            [
+                {
+                    "period_start_utc": "2026-01-01T00:00:00+00:00",
+                    "respondent": "US",
+                    "dimension_value": "1|COL",
+                }
+            ]
+        )
+
+    monkeypatch.setattr(store, "read_sql", fake_read_sql)
+
+    result = store.fetch_platinum_keys(request)
+
+    assert result.iloc[0]["grain_key"] == "2026-01-01T00:00:00Z|US|1|COL"

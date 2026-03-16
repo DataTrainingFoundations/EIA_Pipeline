@@ -45,7 +45,10 @@ def run_comparison(
     if request.stage == "platinum":
         if progress_cb:
             progress_cb("Fetching expected API keys")
-        expected = build_expected_stage_keys(config, request, registry["electricity_region_data"])
+        expected_dataset_id = "electricity_region_data"
+        if request.dataset_id == "platinum.electric_power_operations_monthly":
+            expected_dataset_id = "electricity_power_operational_data"
+        expected = build_expected_stage_keys(config, request, registry[expected_dataset_id])
         if progress_cb:
             progress_cb("Reading Platinum keys from Postgres")
         actual = warehouse_store.fetch_platinum_keys(request)

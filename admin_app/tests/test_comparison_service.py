@@ -118,3 +118,58 @@ def test_run_comparison_excludes_end_boundary_timestamp(monkeypatch, tmp_path: P
 
     assert result.summary.expected_count == 1
     assert result.expected_df["grain_key"].tolist() == ["k1"]
+
+
+def test_run_comparison_uses_power_registry_for_power_platinum(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    expected_df = pd.DataFrame(
+        [
+            {
+                "grain_key": "2026-01-01T00:00:00Z|US|1|COL",
+                "period_start_utc": pd.Timestamp("2026-01-01T00:00:00Z"),
+                "respondent": "US",
+                "dimension_value": "1|COL",
+            }
+        ]
+    )
+    captured = {}
+
+    monkeypatch.setattr(
+        "comparison_service.load_registry",
+        lambda *args, **kwargs: {
+            "electricity_region_data": object(),
+            "electricity_power_operational_data": "power-registry-entry",
+        },
+    )
+
+    def fake_build_expected(_config, _request, dataset):  # noqa: ANN001
+        captured["dataset"] = dataset
+        return expected_df
+
+    monkeypatch.setattr("comparison_service.build_expected_stage_keys", fake_build_expected)
+
+    class FakeParquetStore:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+    class FakeWarehouseStore:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def fetch_platinum_keys(self, *_args, **_kwargs) -> pd.DataFrame:
+            return expected_df
+
+    monkeypatch.setattr("comparison_service.ParquetStore", FakeParquetStore)
+    monkeypatch.setattr("comparison_service.WarehouseStore", FakeWarehouseStore)
+
+    result = run_comparison(
+        _config(tmp_path),
+        ComparisonRequest(
+            dataset_id="platinum.electric_power_operations_monthly",
+            stage="platinum",
+            start_utc=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            end_utc=datetime(2026, 2, 1, tzinfo=timezone.utc),
+        ),
+    )
+
+    assert captured["dataset"] == "power-registry-entry"
+    assert result.summary.status == "ok"

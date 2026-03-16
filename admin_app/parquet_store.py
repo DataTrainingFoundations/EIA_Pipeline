@@ -142,6 +142,23 @@ class ParquetStore:
             """
             return _standardize(conn.execute(query).df().dropna(subset=["dimension_value"]))
 
+        if request.stage == "bronze" and request.dataset_id == "electricity_power_operational_data":
+            query = f"""
+            select
+                cast(json_extract_string(raw_json, '$.payload.period') || '-01T00:00:00Z' as timestamptz) as period_start_utc,
+                json_extract_string(raw_json, '$.payload.location') as respondent,
+                concat(
+                    json_extract_string(raw_json, '$.payload.sectorid'),
+                    '|',
+                    json_extract_string(raw_json, '$.payload.fueltypeid')
+                ) as dimension_value
+            from {source}
+            where event_ts >= timestamptz '{start_literal}'
+              and event_ts < timestamptz '{end_literal}'
+              and dataset_partition = 'electricity_power_operational_data'
+            """
+            return _standardize(conn.execute(query).df().dropna(subset=["dimension_value"]))
+
         if request.stage == "silver" and request.dataset_id == "electricity_region_data":
             query = f"""
             select period as period_start_utc, respondent, type as dimension_value
@@ -162,6 +179,16 @@ class ParquetStore:
             """
             return _standardize(conn.execute(query).df().dropna(subset=["dimension_value"]))
 
+        if request.stage == "silver" and request.dataset_id == "electricity_power_operational_data":
+            query = f"""
+            select period as period_start_utc, location as respondent, concat(sector_id, '|', fueltype_id) as dimension_value
+            from {source}
+            where period >= timestamptz '{start_literal}'
+              and period < timestamptz '{end_literal}'
+              {respondent_clause}
+            """
+            return _standardize(conn.execute(query).df().dropna(subset=["dimension_value"]))
+
         if request.stage == "gold" and request.dataset_id == "electricity_region_data":
             query = f"""
             select period as period_start_utc, respondent, '' as dimension_value
@@ -175,6 +202,16 @@ class ParquetStore:
         if request.stage == "gold" and request.dataset_id == "electricity_fuel_type_data":
             query = f"""
             select period as period_start_utc, respondent, fueltype as dimension_value
+            from {source}
+            where period >= timestamptz '{start_literal}'
+              and period < timestamptz '{end_literal}'
+              {respondent_clause}
+            """
+            return _standardize(conn.execute(query).df().dropna(subset=["dimension_value"]))
+
+        if request.stage == "gold" and request.dataset_id == "electricity_power_operational_data":
+            query = f"""
+            select period as period_start_utc, location as respondent, concat(sector_id, '|', fueltype_id) as dimension_value
             from {source}
             where period >= timestamptz '{start_literal}'
               and period < timestamptz '{end_literal}'

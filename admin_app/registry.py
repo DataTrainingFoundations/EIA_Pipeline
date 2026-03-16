@@ -8,11 +8,16 @@ from typing import Any
 import yaml
 
 
-RAW_DATASET_IDS = ["electricity_region_data", "electricity_fuel_type_data"]
+RAW_DATASET_IDS = [
+    "electricity_region_data",
+    "electricity_fuel_type_data",
+    "electricity_power_operational_data",
+]
 PLATINUM_TARGETS = {
     "platinum.region_demand_daily": "Region Demand Daily",
     "platinum.grid_operations_hourly": "Grid Operations Hourly",
     "platinum.resource_planning_daily": "Resource Planning Daily",
+    "platinum.electric_power_operations_monthly": "Electric Power Operations Monthly",
 }
 FUEL_GOLD_PATH = "s3a://gold/facts/fuel_generation_hourly"
 

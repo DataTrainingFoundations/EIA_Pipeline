@@ -20,8 +20,10 @@ from pipeline_builders import (
     bronze_write_pool,
     global_backfill_pool,
     build_curated_gold_command,
+    build_power_curated_gold_command,
     build_fetch_command,
     build_merge_task,
+    build_power_operations_monthly_platinum_command,
     build_region_daily_platinum_command,
     build_silver_command,
     build_validate_bounds_task,
@@ -31,6 +33,7 @@ from pipeline_builders import (
 from pipeline_constants import (
     BACKFILL_SCHEDULE,
     BRONZE_HOURLY_COVERAGE_COLUMNS,
+    POWER_OPERATIONS_MONTHLY_COLUMNS,
     BRONZE_REPAIR_SCHEDULE,
     BRONZE_VERIFICATION_SCHEDULE,
     REGION_DAILY_COLUMNS,
@@ -58,9 +61,9 @@ def build_incremental_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
     """Build the dataset incremental DAG from ingestion through optional serving."""
 
     dag_id = f"{dataset_id}_incremental"
-    has_silver = dataset_id in {"electricity_region_data", "electricity_fuel_type_data"}
-    has_serving = dataset_id == "electricity_region_data" and bool(dataset.get("platinum_table"))
-    has_curated_gold = dataset_id in {"electricity_region_data", "electricity_fuel_type_data"}
+    has_silver = dataset_id in {"electricity_region_data", "electricity_fuel_type_data", "electricity_power_operational_data"}
+    has_serving = dataset_id in {"electricity_region_data", "electricity_power_operational_data"} and bool(dataset.get("platinum_table"))
+    has_curated_gold = dataset_id in {"electricity_region_data", "electricity_fuel_type_data", "electricity_power_operational_data"}
     incremental_schedule = dataset.get("incremental_schedule", "@hourly")
 
     cli_start_expr = "{{ data_interval_start.in_timezone('UTC').strftime('%Y-%m-%dT%H') }}"
@@ -105,59 +108,111 @@ def build_incremental_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
         if has_curated_gold:
             curated_gold = BashOperator(
                 task_id="spark_curated_gold_batch",
-                bash_command=build_curated_gold_command(dataset_id, start_expr, end_expr),
+                bash_command=(
+                    build_power_curated_gold_command(dataset, start_expr, end_expr)
+                    if dataset_id == "electricity_power_operational_data"
+                    else build_curated_gold_command(dataset_id, start_expr, end_expr)
+                ),
             )
             upstream >> curated_gold
             upstream = curated_gold
 
         if has_serving:
-            stage_table = "platinum.region_demand_daily_stage_{{ ts_nodash | lower }}"
-            platinum = BashOperator(
-                task_id="spark_platinum_stage",
-                bash_command=build_region_daily_platinum_command(stage_table, start_expr, end_expr),
-            )
-            validate_stage_rows = build_validate_rows_task(
-                "validate_platinum_stage_rows",
-                stage_table,
-                description="region demand platinum stage rows",
-                allow_missing_table=True,
-            )
-            merge = build_merge_task(
-                "merge_platinum_stage",
-                "platinum.region_demand_daily",
-                stage_table,
-                REGION_DAILY_COLUMNS,
-                ["date", "respondent"],
-            )
             where_clause = "source_window_start = %s and source_window_end = %s"
             window_params = [start_expr, end_expr]
-            validate_rows = build_validate_rows_task(
-                "validate_platinum_rows",
-                "platinum.region_demand_daily",
-                where_clause=where_clause,
-                params=window_params,
-                description="region demand platinum current window",
-                allow_empty_result=True,
-            )
-            validate_distinct_respondents = build_validate_distinct_task(
-                "validate_platinum_distinct_respondents",
-                "platinum.region_demand_daily",
-                "respondent",
-                where_clause=where_clause,
-                params=window_params,
-                description="region demand platinum current window respondents",
-                allow_empty_result=True,
-            )
-            validate_positive_demand = build_validate_bounds_task(
-                "validate_platinum_nonnegative_demand",
-                "platinum.region_demand_daily",
-                "daily_demand_mwh",
-                min_value=0.0,
-                where_clause=where_clause,
-                params=window_params,
-                description="region demand platinum nonnegative daily demand",
-                allow_empty_result=True,
-            )
+            if dataset_id == "electricity_power_operational_data":
+                stage_table = "platinum.electric_power_operations_monthly_stage_{{ ts_nodash | lower }}"
+                platinum = BashOperator(
+                    task_id="spark_platinum_stage",
+                    bash_command=build_power_operations_monthly_platinum_command(dataset, stage_table, start_expr, end_expr),
+                )
+                validate_stage_rows = build_validate_rows_task(
+                    "validate_platinum_stage_rows",
+                    stage_table,
+                    description="power operations platinum stage rows",
+                    allow_missing_table=True,
+                )
+                merge = build_merge_task(
+                    "merge_platinum_stage",
+                    dataset["platinum_table"],
+                    stage_table,
+                    POWER_OPERATIONS_MONTHLY_COLUMNS,
+                    ["period", "location", "sector_id", "fueltype_id"],
+                )
+                validate_rows = build_validate_rows_task(
+                    "validate_platinum_rows",
+                    dataset["platinum_table"],
+                    where_clause=where_clause,
+                    params=window_params,
+                    description="power operations platinum current window",
+                    allow_empty_result=True,
+                )
+                validate_distinct_respondents = build_validate_distinct_task(
+                    "validate_platinum_distinct_respondents",
+                    dataset["platinum_table"],
+                    "fueltype_id",
+                    where_clause=where_clause,
+                    params=window_params,
+                    description="power operations platinum current window fuels",
+                    allow_empty_result=True,
+                )
+                validate_positive_demand = build_validate_bounds_task(
+                    "validate_platinum_nonnegative_demand",
+                    dataset["platinum_table"],
+                    "generation_share_pct",
+                    min_value=0.0,
+                    max_value=100.0,
+                    where_clause=where_clause,
+                    params=window_params,
+                    description="power operations platinum generation share",
+                    allow_empty_result=True,
+                )
+            else:
+                stage_table = "platinum.region_demand_daily_stage_{{ ts_nodash | lower }}"
+                platinum = BashOperator(
+                    task_id="spark_platinum_stage",
+                    bash_command=build_region_daily_platinum_command(stage_table, start_expr, end_expr),
+                )
+                validate_stage_rows = build_validate_rows_task(
+                    "validate_platinum_stage_rows",
+                    stage_table,
+                    description="region demand platinum stage rows",
+                    allow_missing_table=True,
+                )
+                merge = build_merge_task(
+                    "merge_platinum_stage",
+                    "platinum.region_demand_daily",
+                    stage_table,
+                    REGION_DAILY_COLUMNS,
+                    ["date", "respondent"],
+                )
+                validate_rows = build_validate_rows_task(
+                    "validate_platinum_rows",
+                    "platinum.region_demand_daily",
+                    where_clause=where_clause,
+                    params=window_params,
+                    description="region demand platinum current window",
+                    allow_empty_result=True,
+                )
+                validate_distinct_respondents = build_validate_distinct_task(
+                    "validate_platinum_distinct_respondents",
+                    "platinum.region_demand_daily",
+                    "respondent",
+                    where_clause=where_clause,
+                    params=window_params,
+                    description="region demand platinum current window respondents",
+                    allow_empty_result=True,
+                )
+                validate_positive_demand = build_validate_bounds_task(
+                    "validate_platinum_nonnegative_demand",
+                    "platinum.region_demand_daily",
+                    "daily_demand_mwh",
+                    min_value=0.0,
+                    where_clause=where_clause,
+                    params=window_params,
+                    description="region demand platinum nonnegative daily demand",
+                    allow_empty_result=True,
+                )
             trigger_backfill = PythonOperator(
                 task_id="trigger_backfill_if_idle",
                 python_callable=trigger_backfill_dag_if_idle,
@@ -179,9 +234,9 @@ def build_backfill_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
     """Build the newest-first historical backfill DAG for one dataset."""
 
     dag_id = f"{dataset_id}_backfill"
-    has_silver = dataset_id in {"electricity_region_data", "electricity_fuel_type_data"}
-    has_serving = dataset_id == "electricity_region_data" and bool(dataset.get("platinum_table"))
-    has_curated_gold = dataset_id in {"electricity_region_data", "electricity_fuel_type_data"}
+    has_silver = dataset_id in {"electricity_region_data", "electricity_fuel_type_data", "electricity_power_operational_data"}
+    has_serving = dataset_id in {"electricity_region_data", "electricity_power_operational_data"} and bool(dataset.get("platinum_table"))
+    has_curated_gold = dataset_id in {"electricity_region_data", "electricity_fuel_type_data", "electricity_power_operational_data"}
 
     with DAG(
         dag_id=dag_id,
@@ -256,7 +311,11 @@ def build_backfill_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
         if has_curated_gold:
             curated_gold = BashOperator(
                 task_id="spark_curated_gold_backfill",
-                bash_command=build_curated_gold_command(dataset_id, chunk_start_expr, chunk_end_expr),
+                bash_command=(
+                    build_power_curated_gold_command(dataset, chunk_start_expr, chunk_end_expr)
+                    if dataset_id == "electricity_power_operational_data"
+                    else build_curated_gold_command(dataset_id, chunk_start_expr, chunk_end_expr)
+                ),
                 pool=backfill_pool,
             )
             silver >> curated_gold
@@ -264,54 +323,103 @@ def build_backfill_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
             downstream_failures.append(curated_gold)
 
         if has_serving:
-            stage_table = "platinum.region_demand_daily_stage_backfill_{{ ti.xcom_pull(task_ids='claim_backfill_chunk')['id'] }}"
-            platinum = BashOperator(
-                task_id="spark_platinum_backfill_stage",
-                bash_command=build_region_daily_platinum_command(stage_table, chunk_start_expr, chunk_end_expr),
-                pool=backfill_pool,
-            )
-            validate_stage_rows = build_validate_rows_task(
-                "validate_platinum_backfill_stage_rows",
-                stage_table,
-                description="region demand backfill stage rows",
-                allow_missing_table=True,
-            )
-            merge = build_merge_task(
-                "merge_backfill_stage",
-                "platinum.region_demand_daily",
-                stage_table,
-                REGION_DAILY_COLUMNS,
-                ["date", "respondent"],
-            )
             where_clause = "source_window_start = %s and source_window_end = %s"
             window_params = [chunk_start_expr, chunk_end_expr]
-            validate_rows = build_validate_rows_task(
-                "validate_backfill_rows",
-                "platinum.region_demand_daily",
-                where_clause=where_clause,
-                params=window_params,
-                description="region demand backfill current window",
-                allow_empty_result=True,
-            )
-            validate_distinct_respondents = build_validate_distinct_task(
-                "validate_backfill_distinct_respondents",
-                "platinum.region_demand_daily",
-                "respondent",
-                where_clause=where_clause,
-                params=window_params,
-                description="region demand backfill respondents",
-                allow_empty_result=True,
-            )
-            validate_positive_demand = build_validate_bounds_task(
-                "validate_backfill_nonnegative_demand",
-                "platinum.region_demand_daily",
-                "daily_demand_mwh",
-                min_value=0.0,
-                where_clause=where_clause,
-                params=window_params,
-                description="region demand backfill nonnegative daily demand",
-                allow_empty_result=True,
-            )
+            if dataset_id == "electricity_power_operational_data":
+                stage_table = "platinum.electric_power_operations_monthly_stage_backfill_{{ ti.xcom_pull(task_ids='claim_backfill_chunk')['id'] }}"
+                platinum = BashOperator(
+                    task_id="spark_platinum_backfill_stage",
+                    bash_command=build_power_operations_monthly_platinum_command(dataset, stage_table, chunk_start_expr, chunk_end_expr),
+                    pool=backfill_pool,
+                )
+                validate_stage_rows = build_validate_rows_task(
+                    "validate_platinum_backfill_stage_rows",
+                    stage_table,
+                    description="power operations backfill stage rows",
+                    allow_missing_table=True,
+                )
+                merge = build_merge_task(
+                    "merge_backfill_stage",
+                    dataset["platinum_table"],
+                    stage_table,
+                    POWER_OPERATIONS_MONTHLY_COLUMNS,
+                    ["period", "location", "sector_id", "fueltype_id"],
+                )
+                validate_rows = build_validate_rows_task(
+                    "validate_backfill_rows",
+                    dataset["platinum_table"],
+                    where_clause=where_clause,
+                    params=window_params,
+                    description="power operations backfill current window",
+                    allow_empty_result=True,
+                )
+                validate_distinct_respondents = build_validate_distinct_task(
+                    "validate_backfill_distinct_respondents",
+                    dataset["platinum_table"],
+                    "fueltype_id",
+                    where_clause=where_clause,
+                    params=window_params,
+                    description="power operations backfill fuels",
+                    allow_empty_result=True,
+                )
+                validate_positive_demand = build_validate_bounds_task(
+                    "validate_backfill_nonnegative_demand",
+                    dataset["platinum_table"],
+                    "generation_share_pct",
+                    min_value=0.0,
+                    max_value=100.0,
+                    where_clause=where_clause,
+                    params=window_params,
+                    description="power operations backfill generation share",
+                    allow_empty_result=True,
+                )
+            else:
+                stage_table = "platinum.region_demand_daily_stage_backfill_{{ ti.xcom_pull(task_ids='claim_backfill_chunk')['id'] }}"
+                platinum = BashOperator(
+                    task_id="spark_platinum_backfill_stage",
+                    bash_command=build_region_daily_platinum_command(stage_table, chunk_start_expr, chunk_end_expr),
+                    pool=backfill_pool,
+                )
+                validate_stage_rows = build_validate_rows_task(
+                    "validate_platinum_backfill_stage_rows",
+                    stage_table,
+                    description="region demand backfill stage rows",
+                    allow_missing_table=True,
+                )
+                merge = build_merge_task(
+                    "merge_backfill_stage",
+                    "platinum.region_demand_daily",
+                    stage_table,
+                    REGION_DAILY_COLUMNS,
+                    ["date", "respondent"],
+                )
+                validate_rows = build_validate_rows_task(
+                    "validate_backfill_rows",
+                    "platinum.region_demand_daily",
+                    where_clause=where_clause,
+                    params=window_params,
+                    description="region demand backfill current window",
+                    allow_empty_result=True,
+                )
+                validate_distinct_respondents = build_validate_distinct_task(
+                    "validate_backfill_distinct_respondents",
+                    "platinum.region_demand_daily",
+                    "respondent",
+                    where_clause=where_clause,
+                    params=window_params,
+                    description="region demand backfill respondents",
+                    allow_empty_result=True,
+                )
+                validate_positive_demand = build_validate_bounds_task(
+                    "validate_backfill_nonnegative_demand",
+                    "platinum.region_demand_daily",
+                    "daily_demand_mwh",
+                    min_value=0.0,
+                    where_clause=where_clause,
+                    params=window_params,
+                    description="region demand backfill nonnegative daily demand",
+                    allow_empty_result=True,
+                )
             completion_anchor >> platinum >> validate_stage_rows >> merge >> validate_rows >> validate_distinct_respondents >> validate_positive_demand >> mark_complete >> trigger_next_after_complete
             downstream_failures.extend([platinum, validate_stage_rows, merge, validate_rows, validate_distinct_respondents, validate_positive_demand])
         else:

@@ -1,7 +1,16 @@
 # Airflow
 
 ## Purpose
-This folder owns orchestration: hourly incrementals, historical backfills, disabled Bronze verification/repair code paths, and the platinum-serving DAG schedules.
+This folder owns orchestration: dataset incrementals, historical backfills, disabled Bronze verification/repair code paths, and the platinum-serving DAG schedules.
+
+## Current Scheduling Notes
+- `electricity_region_data_incremental` runs hourly.
+- `electricity_fuel_type_data_incremental` runs daily at `18:20 UTC`.
+- Dataset fetch commands use pipeline windows with `[start, end)` semantics even though the upstream EIA API expects an inclusive `end`.
+
+## Bronze Mismatch Notes
+- Raw Bronze counts can be higher than a point-in-time API query because EIA can revise previously published business hours and Bronze keeps those distinct `event_id` records.
+- A separate boundary-hour over-fetch issue existed in ingestion and is now fixed by translating the exclusive pipeline `end` to the inclusive EIA API `end`.
 
 ## Important Files
 - `dags/pipeline_factories.py`: DAG registration facade.

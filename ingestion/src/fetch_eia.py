@@ -14,8 +14,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from src.eia_api import build_eia_query_params, fetch_dataset_rows
-from src.event_factory import build_event, build_event_id
+from src.eia_api import fetch_dataset_rows
+from src.event_factory import build_event
 from src.publish_kafka import publish_events
 from src.registry import load_dataset_registry
 
@@ -23,16 +23,16 @@ logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse CLI arguments for the ingestion fetch command."""
+    """Parse CLI arguments for the ingestion fetch command using [start, end) windows."""
 
     now = datetime.now(timezone.utc)
     default_end = now.replace(minute=0, second=0, microsecond=0)
     default_start = default_end - timedelta(hours=24)
 
-    parser = argparse.ArgumentParser(description="Fetch EIA data and publish to Kafka.")
+    parser = argparse.ArgumentParser(description="Fetch EIA data and publish to Kafka using [start, end) source windows.")
     parser.add_argument("--dataset", help="Dataset id in registry; if omitted all datasets run.")
-    parser.add_argument("--start", default=default_start.strftime("%Y-%m-%dT%H"))
-    parser.add_argument("--end", default=default_end.strftime("%Y-%m-%dT%H"))
+    parser.add_argument("--start", default=default_start.strftime("%Y-%m-%dT%H"), help="Inclusive UTC hour boundary for the source window.")
+    parser.add_argument("--end", default=default_end.strftime("%Y-%m-%dT%H"), help="Exclusive UTC hour boundary for the source window.")
     parser.add_argument("--page-size", type=int, default=5000)
     parser.add_argument("--max-pages", type=int, default=500)
     parser.add_argument("--respondent", help="Optional respondent filter, example PJM.")

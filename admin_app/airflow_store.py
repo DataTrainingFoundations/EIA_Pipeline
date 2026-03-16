@@ -16,6 +16,8 @@ LOG_PATH_PATTERN = re.compile(
 
 
 def expected_lag_for_dag(dag_id: str) -> timedelta:
+    if dag_id == "electricity_fuel_type_data_incremental":
+        return timedelta(hours=26)
     if dag_id.endswith("_incremental"):
         return timedelta(hours=2)
     if dag_id.endswith("_backfill"):

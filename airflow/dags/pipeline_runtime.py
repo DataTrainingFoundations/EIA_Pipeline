@@ -17,7 +17,7 @@ from typing import Any
 import psycopg2
 import yaml
 
-SUPPORTED_BACKFILL_STEPS = {"hour", "day", "year"}
+SUPPORTED_BACKFILL_STEPS = {"hour", "day", "month", "year"}
 SPARK_MASTER_URL = os.getenv("SPARK_MASTER_URL", "spark://spark-master:7077")
 SPARK_IVY_CACHE = os.getenv("SPARK_IVY_CACHE", "/tmp/.ivy")
 SPARK_SUBMIT_TOTAL_CORES = os.getenv("SPARK_SUBMIT_TOTAL_CORES", "4")
@@ -190,6 +190,8 @@ def _floor_to_step(value: datetime, step: str) -> datetime:
         return value.replace(minute=0, second=0, microsecond=0)
     if step == "day":
         return value.replace(hour=0, minute=0, second=0, microsecond=0)
+    if step == "month":
+        return value.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     if step == "year":
         return value.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
     raise ValueError(f"Unsupported step '{step}'")
@@ -202,6 +204,10 @@ def _advance_step(value: datetime, step: str) -> datetime:
         return value.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
     if step == "day":
         return value.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    if step == "month":
+        year = value.year + (1 if value.month == 12 else 0)
+        month = 1 if value.month == 12 else value.month + 1
+        return value.replace(year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
     if step == "year":
         try:
             return value.replace(year=value.year + 1)
@@ -217,6 +223,10 @@ def _retreat_step(value: datetime, step: str) -> datetime:
         return value - timedelta(hours=1)
     if step == "day":
         return value - timedelta(days=1)
+    if step == "month":
+        year = value.year - (1 if value.month == 1 else 0)
+        month = 12 if value.month == 1 else value.month - 1
+        return value.replace(year=year, month=month, day=1)
     if step == "year":
         try:
             return value.replace(year=value.year - 1)
@@ -229,3 +239,9 @@ def _format_cli_hour(value: datetime) -> str:
     """Format a UTC datetime the way ingestion CLI expects hourly boundaries."""
 
     return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H")
+
+
+def _format_cli_timestamp(value: datetime) -> str:
+    """Format a UTC datetime as an ISO timestamp for non-hourly ingestion windows."""
+
+    return value.astimezone(timezone.utc).isoformat()

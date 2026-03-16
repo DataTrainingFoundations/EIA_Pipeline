@@ -30,6 +30,8 @@ def _parse_event_timestamp(period_value: Any) -> str:
 
     candidate_formats = (
         None,
+        "%Y",
+        "%Y-%m",
         "%Y-%m-%dT%H",
         "%Y-%m-%dT%H:%M",
         "%Y-%m-%dT%H:%M:%S",

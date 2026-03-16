@@ -10,6 +10,8 @@ readonly DATASET_DAGS=(
   electricity_region_data_backfill
   electricity_fuel_type_data_incremental
   electricity_fuel_type_data_backfill
+  electricity_power_operational_data_incremental
+  electricity_power_operational_data_backfill
 )
 readonly PLATINUM_DAGS=(
   platinum_grid_operations_hourly
@@ -19,6 +21,7 @@ readonly ALL_DAGS=("${DATASET_DAGS[@]}" "${PLATINUM_DAGS[@]}")
 readonly BRONZE_WRITE_POOLS=(
   electricity_region_data_bronze_write
   electricity_fuel_type_data_bronze_write
+  electricity_power_operational_data_bronze_write
   global_backfill_worker
 )
 

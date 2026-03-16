@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 from pyspark.sql import Column, DataFrame, Window
-from pyspark.sql.functions import coalesce, col, count, current_timestamp, lower, row_number, to_date, to_timestamp, trim
+from pyspark.sql.functions import coalesce, col, count, countDistinct, current_timestamp, lower, row_number, to_date, to_timestamp, trim
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -77,7 +77,8 @@ def _validate_cleaning_ratio(raw_df: DataFrame, cleaned_df: DataFrame, dataset_i
     """Fail when a dataset window loses too many rows during cleaning."""
 
     raw_dataset_df = raw_df.filter(col("dataset") == dataset_id)
-    raw_count = raw_dataset_df.select(count("*").alias("row_count")).collect()[0]["row_count"]
+    # Bronze windows can contain identical replayed rows for the same event_id.
+    raw_count = raw_dataset_df.select(countDistinct("event_id").alias("row_count")).collect()[0]["row_count"]
     if raw_count == 0:
         return
     cleaned_count = cleaned_df.select(count("*").alias("row_count")).collect()[0]["row_count"]

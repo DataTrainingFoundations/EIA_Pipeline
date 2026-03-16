@@ -24,8 +24,8 @@ def _apply_facets(params: dict[str, Any], facets: dict[str, list[str]] | None) -
         params[f"facets[{facet_name}][]"] = facet_values
 
 
-def _parse_cli_hour(value: str) -> datetime:
-    """Parse an ingestion CLI hour boundary and normalize it to UTC."""
+def _parse_cli_timestamp(value: str) -> datetime:
+    """Parse an ingestion CLI boundary and normalize it to UTC."""
 
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
@@ -33,19 +33,36 @@ def _parse_cli_hour(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _subtarct_months(value: datetime, months: int) -> datetime:
+    year = value.year
+    month=value.month - months
+    while month <= 0:
+        month += 12
+        year -= 1
+    return value.replace(year=year, month=month)
+
 def resolve_api_window_bounds(start: str, end: str, frequency: str = "hourly") -> tuple[str, str]:
     """Translate the pipeline's [start, end) window into EIA API parameters."""
 
-    start_dt = _parse_cli_hour(start)
-    end_dt = _parse_cli_hour(end)
+    start_dt = _parse_cli_timestamp(start)
+    end_dt = _parse_cli_timestamp(end)
     if end_dt <= start_dt:
         raise ValueError(f"Invalid source window: end must be greater than start (start={start}, end={end})")
 
     if frequency == "hourly":
         api_end = end_dt - timedelta(hours=1)
         return start_dt.strftime("%Y-%m-%dT%H"), api_end.strftime("%Y-%m-%dT%H")
+    if frequency == "monthly":
+        api_start = start_dt - timedelta(days=1)
+        api_end = _subtarct_months(end_dt, 1)
+        return api_start.strftime("%Y-%m-%d"), api_end.strftime("%Y-%m-%d")
 
-    return start, end
+    if frequency == "annual":
+        api_start = start_dt - timedelta(days=1)
+        api_end = end_dt.replace(year=end_dt.year - 1)
+        return api_start.strftime("%Y-%m-%d"), api_end.strftime("%Y-%m-%d")
+
+    return start_dt.isoformat(), end_dt.isoformat()
 
 
 def build_eia_query_params(
@@ -54,6 +71,7 @@ def build_eia_query_params(
     end: str,
     offset: int,
     length: int,
+    dataset_config: dict[str, Any],
     default_facets: dict[str, list[str]] | None = None,
     data_columns: list[str] | None = None,
     respondent: str | None = None,
@@ -76,7 +94,7 @@ def build_eia_query_params(
 
     params: dict[str, Any] = {
         "api_key": api_key,
-        "frequency": "hourly",
+        "frequency": dataset_config.get("frequency", "hourly"),  # use dataset frequency
         "start": start,
         "end": end,
         "offset": offset,
@@ -84,8 +102,9 @@ def build_eia_query_params(
         "sort[0][column]": "period",
         "sort[0][direction]": "asc",
     }
-    _apply_facets(params, default_facets)
-    for index, column in enumerate(data_columns or ["value"]):
+    _apply_facets(params, dataset_config.get("default_facets"))
+
+    for index, column in enumerate(dataset_config.get("data_columns", ["value"])):
         params[f"data[{index}]"] = column
     if respondent:
         params["facets[respondent][]"] = [respondent]
@@ -140,8 +159,7 @@ def fetch_dataset_rows(
             end=api_end,
             offset=offset,
             length=page_size,
-            default_facets=dataset_config.get("default_facets"),
-            data_columns=dataset_config.get("data_columns"),
+            dataset_config=dataset_config,
             respondent=respondent,
         )
         response = session.get(query_url, params=params, timeout=timeout_seconds)
@@ -164,3 +182,23 @@ def fetch_dataset_rows(
             break
 
     return all_rows
+
+
+def electric_power_operational_data(api_key, offset=0, length=5000):
+
+    url = "https://api.eia.gov/v2/electricity/electric-power-operational-data/data/"
+
+    params = {
+        "api_key": api_key,
+        "frequency": "annual",
+        "data[0]": "ash-content",
+        "data[1]": "consumption-for-eg",
+        "data[2]": "generation",
+        "data[3]": "heat-content",
+        "offset": offset,
+        "length": length,
+        "sort[0][column]": "period",
+        "sort[0][direction]": "desc"
+    }
+
+    return requests.get(url, params=params)

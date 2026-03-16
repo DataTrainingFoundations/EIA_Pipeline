@@ -65,6 +65,26 @@ def test_enqueue_backfill_jobs_inserts_newest_windows_first(monkeypatch) -> None
     assert cursor.inserted_params[1][2].isoformat() == "2026-03-09T00:00:00+00:00"
 
 
+def test_enqueue_backfill_jobs_uses_month_windows_for_monthly_datasets(monkeypatch) -> None:  # noqa: ANN001
+    cursor = FakeCursor()
+    monkeypatch.setattr(pipeline_backfill, "db_connect", lambda: FakeConnection(cursor))
+    monkeypatch.setattr(
+        pipeline_backfill,
+        "get_dataset",
+        lambda _dataset_id: {"backfill": {"start": "2026-01-01T00:00:00+00:00", "step": "month", "max_pending_chunks": 2}},
+    )
+    monkeypatch.setattr(pipeline_backfill, "recover_stale_backfill_jobs", lambda _dataset_id: 0)
+    monkeypatch.setattr(pipeline_backfill, "datetime", FixedDatetime)
+
+    inserted = pipeline_backfill.enqueue_backfill_jobs("electricity_power_operational_data")
+
+    assert inserted == 2
+    assert cursor.inserted_params[0][1].isoformat() == "2026-02-01T00:00:00+00:00"
+    assert cursor.inserted_params[0][2].isoformat() == "2026-03-01T00:00:00+00:00"
+    assert cursor.inserted_params[1][1].isoformat() == "2026-01-01T00:00:00+00:00"
+    assert cursor.inserted_params[1][2].isoformat() == "2026-02-01T00:00:00+00:00"
+
+
 def test_has_completed_backfill_returns_true_when_completed_exists(monkeypatch) -> None:  # noqa: ANN001
     cursor = FakeCursor(values=[(True,)])
     monkeypatch.setattr(pipeline_backfill, "db_connect", lambda: FakeConnection(cursor))

@@ -135,6 +135,15 @@ FUEL_DATASET = {
     "incremental_schedule": "20 18 * * *",
 }
 
+POWER_DATASET = {
+    "id": "electricity_power_operational_data",
+    "topic": "eia_electricity_power_operational_data",
+    "bronze_output_path": "s3a://bronze/power",
+    "bronze_checkpoint_path": "s3a://bronze/checkpoints/power",
+    "incremental_schedule": "0 0 1 * *",
+    "frequency": "monthly",
+}
+
 
 def test_pipeline_builders_render_expected_commands_and_tasks(monkeypatch) -> None:  # noqa: ANN001
     pipeline_builders = _load_module(monkeypatch, "pipeline_builders")
@@ -177,18 +186,28 @@ def test_dataset_dag_builders_include_expected_tasks_for_region_and_fuel(monkeyp
 
     incremental_region = pipeline_dataset_dags.build_incremental_dag("electricity_region_data", REGION_DATASET)
     incremental_fuel = pipeline_dataset_dags.build_incremental_dag("electricity_fuel_type_data", FUEL_DATASET)
+    incremental_power = pipeline_dataset_dags.build_incremental_dag("electricity_power_operational_data", POWER_DATASET)
     backfill_region = pipeline_dataset_dags.build_backfill_dag("electricity_region_data", REGION_DATASET)
+    backfill_power = pipeline_dataset_dags.build_backfill_dag("electricity_power_operational_data", POWER_DATASET)
     assert incremental_region.kwargs["schedule"] == "@hourly"
     assert incremental_fuel.kwargs["schedule"] == "20 18 * * *"
+    assert incremental_power.kwargs["schedule"] == "0 0 1 * *"
     assert "spark_platinum_stage" in incremental_region.task_dict
     assert "spark_platinum_stage" not in incremental_fuel.task_dict
+    assert "spark_silver_batch" not in incremental_power.task_dict
+    assert "spark_curated_gold_batch" not in incremental_power.task_dict
     assert incremental_region.get_task("spark_curated_gold_batch").downstream_task_ids == {"spark_platinum_stage"}
     assert incremental_region.get_task("spark_bronze_batch").pool == "electricity_region_data_bronze_write"
     assert incremental_fuel.get_task("spark_bronze_batch").pool == "electricity_fuel_type_data_bronze_write"
+    assert incremental_power.get_task("ingest_to_kafka").bash_command.endswith("--start {{ data_interval_start.in_timezone('UTC').isoformat() }} --end {{ data_interval_end.in_timezone('UTC').isoformat() }} --page-size 5000 --max-pages 20")
+    assert incremental_power.get_task("trigger_backfill_if_idle").upstream_task_ids == {"spark_bronze_batch"}
     assert backfill_region.get_task("ingest_backfill_chunk").pool == "global_backfill_worker"
     assert backfill_region.get_task("spark_bronze_backfill_batch").pool == "global_backfill_worker"
     assert backfill_region.get_task("spark_silver_backfill").pool == "global_backfill_worker"
     assert backfill_region.get_task("spark_curated_gold_backfill").pool == "global_backfill_worker"
+    assert "spark_silver_backfill" not in backfill_power.task_dict
+    assert backfill_power.get_task("spark_bronze_backfill_batch").pool == "global_backfill_worker"
+    assert backfill_power.get_task("mark_backfill_complete").upstream_task_ids == {"spark_bronze_backfill_batch"}
     assert incremental_region.get_task("validate_platinum_rows").op_kwargs["allow_empty_result"] is True
     assert incremental_region.get_task("validate_platinum_distinct_respondents").op_kwargs["allow_empty_result"] is True
     assert incremental_region.get_task("validate_platinum_nonnegative_demand").op_kwargs["allow_empty_result"] is True
@@ -244,6 +263,8 @@ def test_factories_and_support_wrapper_integrate_with_real_registry(monkeypatch)
     assert set(dags) == {
         "electricity_fuel_type_data_backfill",
         "electricity_fuel_type_data_incremental",
+        "electricity_power_operational_data_backfill",
+        "electricity_power_operational_data_incremental",
         "electricity_region_data_backfill",
         "electricity_region_data_incremental",
         "platinum_grid_operations_hourly",
@@ -259,6 +280,8 @@ def test_wrapper_dag_modules_expose_expected_dag(monkeypatch) -> None:  # noqa: 
         "electricity_region_data_backfill": "electricity_region_data_backfill",
         "electricity_fuel_type_data_incremental": "electricity_fuel_type_data_incremental",
         "electricity_fuel_type_data_backfill": "electricity_fuel_type_data_backfill",
+        "electricity_power_operational_data_incremental": "electricity_power_operational_data_incremental",
+        "electricity_power_operational_data_backfill": "electricity_power_operational_data_backfill",
         "platinum_grid_operations_hourly": "platinum_grid_operations_hourly",
         "platinum_resource_planning_daily": "platinum_resource_planning_daily",
     }

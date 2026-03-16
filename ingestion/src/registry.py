@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml
 
-SUPPORTED_BACKFILL_STEPS = {"hour", "day", "year"}
+SUPPORTED_BACKFILL_STEPS = {"hour", "day", "month", "year"}
 
 
 def load_dataset_registry(path: Path) -> dict[str, dict[str, Any]]:

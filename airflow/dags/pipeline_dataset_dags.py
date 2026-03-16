@@ -58,9 +58,16 @@ def build_incremental_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
     """Build the dataset incremental DAG from ingestion through optional serving."""
 
     dag_id = f"{dataset_id}_incremental"
+    has_silver = dataset_id in {"electricity_region_data", "electricity_fuel_type_data"}
     has_serving = dataset_id == "electricity_region_data" and bool(dataset.get("platinum_table"))
     has_curated_gold = dataset_id in {"electricity_region_data", "electricity_fuel_type_data"}
     incremental_schedule = dataset.get("incremental_schedule", "@hourly")
+
+    cli_start_expr = "{{ data_interval_start.in_timezone('UTC').strftime('%Y-%m-%dT%H') }}"
+    cli_end_expr = "{{ data_interval_end.in_timezone('UTC').strftime('%Y-%m-%dT%H') }}"
+    if dataset.get("frequency") != "hourly":
+        cli_start_expr = "{{ data_interval_start.in_timezone('UTC').isoformat() }}"
+        cli_end_expr = "{{ data_interval_end.in_timezone('UTC').isoformat() }}"
 
     with DAG(
         dag_id=dag_id,
@@ -74,8 +81,6 @@ def build_incremental_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
     ) as dag:
         start_expr = "{{ data_interval_start.in_timezone('UTC').isoformat() }}"
         end_expr = "{{ data_interval_end.in_timezone('UTC').isoformat() }}"
-        cli_start_expr = "{{ data_interval_start.in_timezone('UTC').strftime('%Y-%m-%dT%H') }}"
-        cli_end_expr = "{{ data_interval_end.in_timezone('UTC').strftime('%Y-%m-%dT%H') }}"
 
         ingest = BashOperator(
             task_id="ingest_to_kafka",
@@ -86,13 +91,16 @@ def build_incremental_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
             bash_command=build_bronze_command(dataset),
             pool=bronze_write_pool(dataset_id),
         )
-        silver = BashOperator(
-            task_id="spark_silver_batch",
-            bash_command=build_silver_command(dataset, dataset_id, start_expr, end_expr),
-        )
+        ingest >> bronze
+        upstream = bronze
 
-        ingest >> bronze >> silver
-        upstream = silver
+        if has_silver:
+            silver = BashOperator(
+                task_id="spark_silver_batch",
+                bash_command=build_silver_command(dataset, dataset_id, start_expr, end_expr),
+            )
+            bronze >> silver
+            upstream = silver
 
         if has_curated_gold:
             curated_gold = BashOperator(
@@ -171,6 +179,7 @@ def build_backfill_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
     """Build the newest-first historical backfill DAG for one dataset."""
 
     dag_id = f"{dataset_id}_backfill"
+    has_silver = dataset_id in {"electricity_region_data", "electricity_fuel_type_data"}
     has_serving = dataset_id == "electricity_region_data" and bool(dataset.get("platinum_table"))
     has_curated_gold = dataset_id in {"electricity_region_data", "electricity_fuel_type_data"}
 
@@ -202,10 +211,6 @@ def build_backfill_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
             bash_command=build_bronze_command(dataset),
             pool=bronze_write_pool(dataset_id),
         )
-        silver = BashOperator(
-            task_id="spark_silver_backfill",
-            bash_command=build_silver_command(dataset, dataset_id, chunk_start_expr, chunk_end_expr),
-        )
         mark_complete = PythonOperator(
             task_id="mark_backfill_complete",
             python_callable=mark_backfill_completed,
@@ -231,12 +236,22 @@ def build_backfill_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
             op_kwargs={"dataset_id": dataset_id, "ignore_run_id": "{{ run_id }}"},
         )
 
-        enqueue >> claim >> has_work >> ingest >> bronze >> silver
-        downstream_failures = [ingest, bronze, silver]
-        completion_anchor = silver
+        enqueue >> claim >> has_work >> ingest >> bronze
+        downstream_failures = [ingest, bronze]
+        completion_anchor = bronze
         backfill_pool = global_backfill_pool()
-        for task in (ingest, bronze, silver):
+        for task in (ingest, bronze):
             task.pool = backfill_pool
+
+        if has_silver:
+            silver = BashOperator(
+                task_id="spark_silver_backfill",
+                bash_command=build_silver_command(dataset, dataset_id, chunk_start_expr, chunk_end_expr),
+                pool=backfill_pool,
+            )
+            bronze >> silver
+            completion_anchor = silver
+            downstream_failures.append(silver)
 
         if has_curated_gold:
             curated_gold = BashOperator(

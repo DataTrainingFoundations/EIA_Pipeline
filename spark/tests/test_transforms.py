@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from common.io import write_partitioned_parquet
+from common.io import merge_partitioned_parquet, write_partitioned_parquet
 from jobs.gold_region_fuel_serving_hourly import build_region_hourly_metrics, build_respondent_dimension
 from jobs.platinum_region_demand_daily import build_region_demand_daily
 from jobs.platinum_resource_planning_daily import build_resource_planning_daily
@@ -297,6 +297,112 @@ def test_write_partitioned_parquet_overwrites_only_touched_partitions(spark_sess
     assert rows[0]["metric"] == 100.0
     assert rows[1]["respondent"] == "MISO"
     assert rows[1]["metric"] == 250.0
+
+
+def test_merge_partitioned_parquet_preserves_same_day_rows_across_writes(spark_session, tmp_path) -> None:
+    output_path = tmp_path / "merged_silver_dataset"
+    first_df = spark_session.createDataFrame(
+        [
+            {
+                "event_id": "evt-1",
+                "period": datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
+                "respondent": "PJM",
+                "loaded_at": datetime(2026, 1, 1, 0, 10, tzinfo=timezone.utc),
+                "event_date": datetime(2026, 1, 1, tzinfo=timezone.utc).date(),
+            }
+        ]
+    )
+    second_df = spark_session.createDataFrame(
+        [
+            {
+                "event_id": "evt-2",
+                "period": datetime(2026, 1, 1, 1, 0, tzinfo=timezone.utc),
+                "respondent": "PJM",
+                "loaded_at": datetime(2026, 1, 1, 1, 10, tzinfo=timezone.utc),
+                "event_date": datetime(2026, 1, 1, tzinfo=timezone.utc).date(),
+            }
+        ]
+    )
+
+    merge_partitioned_parquet(first_df, str(output_path), merge_keys=["event_id"], freshness_columns=["loaded_at"])
+    merge_partitioned_parquet(second_df, str(output_path), merge_keys=["event_id"], freshness_columns=["loaded_at"])
+
+    rows = spark_session.read.parquet(str(output_path)).orderBy("period").collect()
+
+    assert len(rows) == 2
+    assert [row["event_id"] for row in rows] == ["evt-1", "evt-2"]
+
+
+def test_merge_partitioned_parquet_preserves_earlier_gold_hours_when_later_hour_arrives(spark_session, tmp_path) -> None:
+    output_path = tmp_path / "merged_gold_dataset"
+    first_df = spark_session.createDataFrame(
+        [
+            {
+                "period": datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
+                "respondent": "PJM",
+                "actual_demand_mwh": 100.0,
+                "day_ahead_forecast_mwh": 95.0,
+                "loaded_at": datetime(2026, 1, 1, 0, 10, tzinfo=timezone.utc),
+                "event_date": datetime(2026, 1, 1, tzinfo=timezone.utc).date(),
+            }
+        ]
+    )
+    second_df = spark_session.createDataFrame(
+        [
+            {
+                "period": datetime(2026, 1, 1, 1, 0, tzinfo=timezone.utc),
+                "respondent": "PJM",
+                "actual_demand_mwh": 110.0,
+                "day_ahead_forecast_mwh": 100.0,
+                "loaded_at": datetime(2026, 1, 1, 1, 10, tzinfo=timezone.utc),
+                "event_date": datetime(2026, 1, 1, tzinfo=timezone.utc).date(),
+            }
+        ]
+    )
+
+    merge_partitioned_parquet(first_df, str(output_path), merge_keys=["period", "respondent"], freshness_columns=["loaded_at"])
+    merge_partitioned_parquet(second_df, str(output_path), merge_keys=["period", "respondent"], freshness_columns=["loaded_at"])
+
+    rows = spark_session.read.parquet(str(output_path)).orderBy("period").collect()
+
+    assert len(rows) == 2
+    assert [row["actual_demand_mwh"] for row in rows] == [100.0, 110.0]
+
+
+def test_merge_partitioned_parquet_replaces_same_gold_key_with_latest_loaded_at(spark_session, tmp_path) -> None:
+    output_path = tmp_path / "merged_gold_updates"
+    first_df = spark_session.createDataFrame(
+        [
+            {
+                "period": datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
+                "respondent": "PJM",
+                "actual_demand_mwh": 100.0,
+                "day_ahead_forecast_mwh": 95.0,
+                "loaded_at": datetime(2026, 1, 1, 0, 10, tzinfo=timezone.utc),
+                "event_date": datetime(2026, 1, 1, tzinfo=timezone.utc).date(),
+            }
+        ]
+    )
+    second_df = spark_session.createDataFrame(
+        [
+            {
+                "period": datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
+                "respondent": "PJM",
+                "actual_demand_mwh": 120.0,
+                "day_ahead_forecast_mwh": 98.0,
+                "loaded_at": datetime(2026, 1, 1, 0, 20, tzinfo=timezone.utc),
+                "event_date": datetime(2026, 1, 1, tzinfo=timezone.utc).date(),
+            }
+        ]
+    )
+
+    merge_partitioned_parquet(first_df, str(output_path), merge_keys=["period", "respondent"], freshness_columns=["loaded_at"])
+    merge_partitioned_parquet(second_df, str(output_path), merge_keys=["period", "respondent"], freshness_columns=["loaded_at"])
+
+    rows = spark_session.read.parquet(str(output_path)).collect()
+
+    assert len(rows) == 1
+    assert rows[0]["actual_demand_mwh"] == 120.0
 
 
 def test_region_demand_daily_aggregates_hourly_curated_gold_rows(spark_session) -> None:

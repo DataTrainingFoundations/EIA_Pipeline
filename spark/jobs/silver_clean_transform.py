@@ -18,7 +18,7 @@ from pyspark.sql.functions import coalesce, col, count, countDistinct, current_t
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from common.config import load_spark_app_config
-from common.io import path_exists, write_partitioned_parquet
+from common.io import merge_partitioned_parquet, path_exists
 from common.logging_utils import configure_logging, log_job_complete, log_job_start
 from common.quality import assert_allowed_values, assert_no_conflicting_records, assert_no_nulls, assert_unique_keys
 from common.spark_session import build_spark_session
@@ -255,7 +255,13 @@ def validate_non_empty(raw_df: DataFrame, cleaned_df: DataFrame, dataset_id: str
 def write_partitioned_dataset(df: DataFrame, output_path: str) -> None:
     """Write a non-empty Silver dataset partitioned by event date."""
 
-    write_partitioned_parquet(df, output_path, partition_column="event_date")
+    merge_partitioned_parquet(
+        df,
+        output_path,
+        merge_keys=["event_id"],
+        freshness_columns=["loaded_at"],
+        partition_column="event_date",
+    )
 
 
 def main() -> None:

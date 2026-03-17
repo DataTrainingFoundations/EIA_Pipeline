@@ -41,7 +41,13 @@ def _subtarct_months(value: datetime, months: int) -> datetime:
         year -= 1
     return value.replace(year=year, month=month)
 
-def resolve_api_window_bounds(start: str, end: str, frequency: str = "hourly") -> tuple[str, str]:
+def resolve_api_window_bounds(
+    start: str,
+    end: str,
+    frequency: str = "hourly",
+    *,
+    hourly_window_mode: str = "interval",
+) -> tuple[str, str]:
     """Translate the pipeline's [start, end) window into EIA API parameters."""
 
     start_dt = _parse_cli_timestamp(start)
@@ -50,7 +56,10 @@ def resolve_api_window_bounds(start: str, end: str, frequency: str = "hourly") -
         raise ValueError(f"Invalid source window: end must be greater than start (start={start}, end={end})")
 
     if frequency == "hourly":
-        api_end = end_dt - timedelta(hours=1)
+        if hourly_window_mode == "current_day_end":
+            api_end = start_dt.replace(hour=23, minute=0, second=0, microsecond=0)
+        else:
+            api_end = end_dt - timedelta(hours=1)
         return start_dt.strftime("%Y-%m-%dT%H"), api_end.strftime("%Y-%m-%dT%H")
     if frequency == "monthly":
         api_start = start_dt - timedelta(days=1)
@@ -145,7 +154,12 @@ def fetch_dataset_rows(
 
     route = dataset_config["route"]
     query_url = f"{EIA_API_BASE_URL}/{route}/data/"
-    api_start, api_end = resolve_api_window_bounds(start, end, dataset_config.get("frequency", "hourly"))
+    api_start, api_end = resolve_api_window_bounds(
+        start,
+        end,
+        dataset_config.get("frequency", "hourly"),
+        hourly_window_mode=dataset_config.get("hourly_window_mode", "interval"),
+    )
     offset = 0
     all_rows: list[dict[str, Any]] = []
     page_count = 0

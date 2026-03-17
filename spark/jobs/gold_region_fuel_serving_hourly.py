@@ -18,7 +18,7 @@ from pyspark.sql import functions as F
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from common.config import load_spark_app_config
-from common.io import has_partitioned_parquet_input, read_parquet_if_exists, read_partitioned_parquet, write_partitioned_parquet
+from common.io import has_partitioned_parquet_input, merge_partitioned_parquet, read_parquet_if_exists, read_partitioned_parquet
 from common.logging_utils import configure_logging, log_job_complete, log_job_start
 from common.quality import assert_no_nulls, assert_non_negative, assert_unique_keys
 from common.spark_session import build_spark_session
@@ -163,10 +163,16 @@ def build_fuel_type_hourly_generation(fuel_df: DataFrame) -> DataFrame:
     return gold_df
 
 
-def write_partitioned(df: DataFrame, output_path: str) -> None:
-    """Write a non-empty fact dataset partitioned by event date."""
+def write_partitioned(df: DataFrame, output_path: str, *, merge_keys: list[str]) -> None:
+    """Write a fact dataset while preserving earlier rows in touched day partitions."""
 
-    write_partitioned_parquet(df, output_path, partition_column="event_date")
+    merge_partitioned_parquet(
+        df,
+        output_path,
+        merge_keys=merge_keys,
+        freshness_columns=["loaded_at"],
+        partition_column="event_date",
+    )
 
 
 def build_respondent_dimension(spark, region_df: DataFrame | None, fuel_df: DataFrame | None, existing_path: str) -> DataFrame:  # noqa: ANN001
@@ -364,7 +370,7 @@ def main() -> None:
             )
             region_df = filter_time_window(region_df, "period", args.start, args.end)
             region_gold_df = build_region_hourly_metrics(region_df)
-            write_partitioned(region_gold_df, args.region_fact_path)
+            write_partitioned(region_gold_df, args.region_fact_path, merge_keys=["period", "respondent"])
         else:
             logger.info(
                 "Skipping Gold region fact build because no Silver input is available input_path=%s start=%s end=%s",
@@ -384,7 +390,7 @@ def main() -> None:
             )
             fuel_df = filter_time_window(fuel_df, "period", args.start, args.end)
             fuel_gold_df = build_fuel_type_hourly_generation(fuel_df)
-            write_partitioned(fuel_gold_df, args.fuel_fact_path)
+            write_partitioned(fuel_gold_df, args.fuel_fact_path, merge_keys=["period", "respondent", "fueltype"])
         else:
             logger.info(
                 "Skipping Gold fuel fact build because no Silver input is available input_path=%s start=%s end=%s",

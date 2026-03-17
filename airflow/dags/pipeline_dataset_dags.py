@@ -49,7 +49,6 @@ from pipeline_support import (
     mark_backfill_failed,
     mark_bronze_repair_completed,
     mark_bronze_repair_failed,
-    trigger_backfill_dag_if_idle,
     trigger_repair_dag_if_idle,
 )
 
@@ -215,20 +214,7 @@ def build_incremental_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
                     description="region demand platinum nonnegative daily demand",
                     allow_empty_result=True,
                 )
-            trigger_backfill = PythonOperator(
-                task_id="trigger_backfill_if_idle",
-                python_callable=trigger_backfill_dag_if_idle,
-                op_kwargs={"dataset_id": dataset_id},
-            )
-            upstream >> platinum >> validate_stage_rows >> merge >> validate_rows >> validate_distinct_respondents >> validate_positive_demand >> trigger_backfill
-        else:
-            trigger_backfill = PythonOperator(
-                task_id="trigger_backfill_if_idle",
-                python_callable=trigger_backfill_dag_if_idle,
-                op_kwargs={"dataset_id": dataset_id},
-            )
-            upstream >> trigger_backfill
-
+            upstream >> platinum >> validate_stage_rows >> merge >> validate_rows >> validate_distinct_respondents >> validate_positive_demand
     return dag
 
 
@@ -282,17 +268,6 @@ def build_backfill_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
             },
             trigger_rule=TriggerRule.ONE_FAILED,
         )
-        trigger_next_after_complete = PythonOperator(
-            task_id="trigger_next_backfill_if_idle",
-            python_callable=trigger_backfill_dag_if_idle,
-            op_kwargs={"dataset_id": dataset_id, "ignore_run_id": "{{ run_id }}"},
-        )
-        trigger_next_after_failure = PythonOperator(
-            task_id="trigger_next_backfill_after_failure_if_idle",
-            python_callable=trigger_backfill_dag_if_idle,
-            op_kwargs={"dataset_id": dataset_id, "ignore_run_id": "{{ run_id }}"},
-        )
-
         enqueue >> claim >> has_work >> ingest >> bronze
         downstream_failures = [ingest, bronze]
         completion_anchor = bronze
@@ -422,12 +397,12 @@ def build_backfill_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
                     description="region demand backfill nonnegative daily demand",
                     allow_empty_result=True,
                 )
-            completion_anchor >> platinum >> validate_stage_rows >> merge >> validate_rows >> validate_distinct_respondents >> validate_positive_demand >> mark_complete >> trigger_next_after_complete
+            completion_anchor >> platinum >> validate_stage_rows >> merge >> validate_rows >> validate_distinct_respondents >> validate_positive_demand >> mark_complete
             downstream_failures.extend([platinum, validate_stage_rows, merge, validate_rows, validate_distinct_respondents, validate_positive_demand])
         else:
-            completion_anchor >> mark_complete >> trigger_next_after_complete
+            completion_anchor >> mark_complete
 
-        downstream_failures >> mark_failed >> trigger_next_after_failure
+        downstream_failures >> mark_failed
 
     return dag
 

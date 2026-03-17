@@ -70,7 +70,8 @@ Business serving DAGs:
 Backfill runs newest-first.
 The first chunk spans the current UTC week start through the current hour boundary.
 Later chunks move backward one UTC calendar week at a time.
-Backfill is triggered after successful incrementals and also has an hourly safety schedule from `AIRFLOW_BACKFILL_SCHEDULE`, which now defaults to `5 * * * *`.
+Backfill runs on the Airflow schedule from `AIRFLOW_BACKFILL_SCHEDULE`, which defaults to `5 * * * *`.
+Each scheduled run processes at most one backfill chunk.
 
 ## Time and UI Notes
 

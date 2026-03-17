@@ -5,9 +5,12 @@ Airflow DAG: EIA Electricity — Hourly Refresh
 
 Schedule: Every hour at :15 past (gives EIA time to publish)
 
-Fetches only the last 2 hours of data to keep runs fast (<5 min).
+Fetches only the last 2 hours of data to keep runs fast.
 Runs the full bronze → silver → gold → platinum → postgres stack
 for the current date partition.
+
+spark_submit_cmd uses --packages (Maven download) matching the working
+eia_electricity_pipeline.py pattern. Spark 4.1.0 / Scala 2.13.
 """
 
 from __future__ import annotations
@@ -38,15 +41,7 @@ POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "platform")
 SPARK_MASTER   = "spark://spark-master:7077"
 SPARK_JOBS_DIR = "/opt/spark/jobs"
 
-SPARK_JARS = ",".join([
-    "/opt/spark/jars/spark-sql-kafka-0-10_2.13-4.1.0.jar",
-    "/opt/spark/jars/spark-token-provider-kafka-0-10_2.13-4.1.0.jar",
-    "/opt/spark/jars/kafka-clients-3.4.1.jar",
-    "/opt/spark/jars/commons-pool2-2.11.1.jar",
-    "/opt/spark/jars/hadoop-aws-3.4.2.jar",
-    "/opt/spark/jars/aws-java-sdk-bundle-1.12.780.jar",
-])
-
+# Spark 4.1.0 uses Scala 2.13 — _2.13 suffix required
 SPARK_PACKAGES = (
     "org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.0,"
     "org.apache.hadoop:hadoop-aws:3.4.2,"
@@ -55,7 +50,7 @@ SPARK_PACKAGES = (
 
 
 def spark_submit_cmd(script: str, args: str = "") -> str:
-    """Build a docker exec command that runs spark-submit on spark-master."""
+    """Build a docker exec spark-submit using --packages, matching working pipeline."""
     env_vars = (
         f"MINIO_ENDPOINT={MINIO_ENDPOINT} "
         f"MINIO_ROOT_USER={MINIO_USER} "
@@ -90,7 +85,7 @@ def load_platinum_to_postgres(ds: str, **kwargs) -> None:
         endpoint_url=MINIO_ENDPOINT, use_ssl=False,
     )
     conn = psycopg2.connect(
-        host=POSTGRES_HOST, port=int(POSTGRES_PORT),
+        host=POSTGRES_HOST, port=POSTGRES_PORT,
         dbname=POSTGRES_DB, user=POSTGRES_USER, password=POSTGRES_PASSWORD,
     )
 
@@ -100,7 +95,8 @@ def load_platinum_to_postgres(ds: str, **kwargs) -> None:
             "path": f"gold/eia/platinum_dim_balancing_authority/date={ds}",
             "columns": ["ba_code", "ba_name"],
             "upsert_sql": """
-                INSERT INTO dim_balancing_authority (ba_code, ba_name) VALUES %s
+                INSERT INTO dim_balancing_authority (ba_code, ba_name)
+                VALUES %s
                 ON CONFLICT (ba_code) DO UPDATE SET ba_name = EXCLUDED.ba_name;
             """,
         },
@@ -109,7 +105,8 @@ def load_platinum_to_postgres(ds: str, **kwargs) -> None:
             "path": f"gold/eia/platinum_dim_fuel_type/date={ds}",
             "columns": ["fuel_code", "fuel_name"],
             "upsert_sql": """
-                INSERT INTO dim_fuel_type (fuel_code, fuel_name) VALUES %s
+                INSERT INTO dim_fuel_type (fuel_code, fuel_name)
+                VALUES %s
                 ON CONFLICT (fuel_code) DO UPDATE SET fuel_name = EXCLUDED.fuel_name;
             """,
         },
@@ -176,10 +173,10 @@ def load_platinum_to_postgres(ds: str, **kwargs) -> None:
         with conn.cursor() as cur:
             for cfg in table_configs:
                 try:
-                    dataset = pq.ParquetDataset(cfg["path"], filesystem=fs)
-                    table   = dataset.read(columns=cfg["columns"])
+                    dataset  = pq.ParquetDataset(cfg["path"], filesystem=fs)
+                    table    = dataset.read(columns=cfg["columns"])
                     col_data = [table.column(c).to_pylist() for c in cfg["columns"]]
-                    rows = list(zip(*col_data))
+                    rows     = list(zip(*col_data))
                     if not rows:
                         print(f"[postgres] No rows for {cfg['table']} — skipping")
                         continue
@@ -189,6 +186,7 @@ def load_platinum_to_postgres(ds: str, **kwargs) -> None:
                     print(f"[postgres] WARNING: Failed to load {cfg['table']}: {exc}")
                     raise
     conn.close()
+    print(f"[postgres] All platinum tables loaded for {ds}")
 
 
 # ── DAG ───────────────────────────────────────────────────────────────────────
@@ -196,8 +194,9 @@ default_args = {
     "owner": "airflow",
     "depends_on_past": False,
     "email_on_failure": False,
-    "retries": 1,
-    "retry_delay": timedelta(minutes=2),
+    "email_on_retry": False,
+    "retries": 2,
+    "retry_delay": timedelta(minutes=5),
 }
 
 with DAG(
@@ -219,11 +218,11 @@ with DAG(
             "python fetch_eia.py"
         ),
         env={
-            "EIA_API_KEY":          os.environ.get("EIA_API_KEY", ""),
-            "KAFKA_BROKER":         KAFKA_BROKER,
-            "MINIO_ROOT_USER":      MINIO_USER,
-            "MINIO_ROOT_PASSWORD":  MINIO_PASSWORD,
-            "PATH":                 os.environ.get("PATH", ""),
+            "EIA_API_KEY":         os.environ.get("EIA_API_KEY", ""),
+            "KAFKA_BROKER":        KAFKA_BROKER,
+            "MINIO_ROOT_USER":     MINIO_USER,
+            "MINIO_ROOT_PASSWORD": MINIO_PASSWORD,
+            "PATH":                os.environ.get("PATH", ""),
         },
     )
 
@@ -233,6 +232,7 @@ with DAG(
             "bronze_kafka_to_minio.py",
             "--topic eia.electricity.generation --date {{ ds }}"
         ),
+        doc_md="Consume generation Kafka topic → MinIO bronze/.",
     )
 
     bronze_demand = BashOperator(
@@ -241,6 +241,7 @@ with DAG(
             "bronze_kafka_to_minio.py",
             "--topic eia.electricity.demand --date {{ ds }}"
         ),
+        doc_md="Consume demand Kafka topic → MinIO bronze/.",
     )
 
     silver_generation = BashOperator(
@@ -249,6 +250,7 @@ with DAG(
             "silver_clean_transform.py",
             "--dataset electricity_generation --date {{ ds }}"
         ),
+        doc_md="Clean and normalize generation data → MinIO silver/.",
     )
 
     silver_demand = BashOperator(
@@ -257,21 +259,25 @@ with DAG(
             "silver_clean_transform.py",
             "--dataset electricity_demand --date {{ ds }}"
         ),
+        doc_md="Clean and normalize demand data → MinIO silver/.",
     )
 
     gold = BashOperator(
         task_id="gold_aggregations",
         bash_command=spark_submit_cmd("gold_to_postgres.py", "--date {{ ds }}"),
+        doc_md="Aggregate generation and demand → MinIO gold/.",
     )
 
     platinum = BashOperator(
         task_id="platinum_serving_tables",
         bash_command=spark_submit_cmd("platinum_serving_tables.py", "--date {{ ds }}"),
+        doc_md="Build serving schema tables in MinIO gold/platinum_*/.",
     )
 
     load_postgres = PythonOperator(
         task_id="load_postgres",
         python_callable=load_platinum_to_postgres,
+        doc_md="Upsert platinum Parquet into PostgreSQL warehouse tables.",
     )
 
     ingest >> [bronze_generation, bronze_demand]

@@ -1,4 +1,4 @@
-"""Compatibility facade — pages import from here."""
+"""Compatibility facade — pages import everything from here."""
 
 from data_access_shared import *      # noqa: F403
 from data_access_summary import *     # noqa: F403

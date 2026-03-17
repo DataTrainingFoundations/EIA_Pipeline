@@ -12,6 +12,9 @@ Trigger manually from the Airflow UI with config:
 
 Default (no config): backfills the last 90 days in 30-day chunks.
 Schedule: None (manual trigger only)
+
+spark_submit_cmd uses --packages (Maven download) matching the working
+eia_electricity_pipeline.py pattern. Spark 4.1.0 / Scala 2.13.
 """
 
 from __future__ import annotations
@@ -42,15 +45,7 @@ POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "platform")
 SPARK_MASTER   = "spark://spark-master:7077"
 SPARK_JOBS_DIR = "/opt/spark/jobs"
 
-SPARK_JARS = ",".join([
-    "/opt/spark/jars/spark-sql-kafka-0-10_2.13-4.1.0.jar",
-    "/opt/spark/jars/spark-token-provider-kafka-0-10_2.13-4.1.0.jar",
-    "/opt/spark/jars/kafka-clients-3.4.1.jar",
-    "/opt/spark/jars/commons-pool2-2.11.1.jar",
-    "/opt/spark/jars/hadoop-aws-3.4.2.jar",
-    "/opt/spark/jars/aws-java-sdk-bundle-1.12.780.jar",
-])
-
+# Spark 4.1.0 uses Scala 2.13 — _2.13 suffix required
 SPARK_PACKAGES = (
     "org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.0,"
     "org.apache.hadoop:hadoop-aws:3.4.2,"
@@ -59,7 +54,7 @@ SPARK_PACKAGES = (
 
 
 def spark_submit_cmd(script: str, args: str = "") -> str:
-    """Build a docker exec command that runs spark-submit on spark-master."""
+    """Build a docker exec spark-submit using --packages, matching working pipeline."""
     env_vars = (
         f"MINIO_ENDPOINT={MINIO_ENDPOINT} "
         f"MINIO_ROOT_USER={MINIO_USER} "
@@ -148,7 +143,7 @@ def load_all_chunks_to_postgres(**context) -> None:
         endpoint_url=MINIO_ENDPOINT, use_ssl=False,
     )
     conn = psycopg2.connect(
-        host=POSTGRES_HOST, port=int(POSTGRES_PORT),
+        host=POSTGRES_HOST, port=POSTGRES_PORT,
         dbname=POSTGRES_DB, user=POSTGRES_USER, password=POSTGRES_PASSWORD,
     )
 
@@ -257,7 +252,8 @@ default_args = {
     "owner": "airflow",
     "depends_on_past": False,
     "email_on_failure": False,
-    "retries": 1,
+    "email_on_retry": False,
+    "retries": 2,
     "retry_delay": timedelta(minutes=5),
 }
 
@@ -295,6 +291,7 @@ with DAG(
             "bronze_kafka_to_minio.py",
             "--topic eia.electricity.generation --date {{ ds }}"
         ),
+        doc_md="Consume generation Kafka topic → MinIO bronze/.",
     )
 
     bronze_demand = BashOperator(
@@ -303,6 +300,7 @@ with DAG(
             "bronze_kafka_to_minio.py",
             "--topic eia.electricity.demand --date {{ ds }}"
         ),
+        doc_md="Consume demand Kafka topic → MinIO bronze/.",
     )
 
     silver_generation = BashOperator(
@@ -311,6 +309,7 @@ with DAG(
             "silver_clean_transform.py",
             "--dataset electricity_generation --date {{ ds }}"
         ),
+        doc_md="Clean and normalize generation data → MinIO silver/.",
     )
 
     silver_demand = BashOperator(
@@ -319,16 +318,19 @@ with DAG(
             "silver_clean_transform.py",
             "--dataset electricity_demand --date {{ ds }}"
         ),
+        doc_md="Clean and normalize demand data → MinIO silver/.",
     )
 
     gold = BashOperator(
         task_id="gold_aggregations",
         bash_command=spark_submit_cmd("gold_to_postgres.py", "--date {{ ds }}"),
+        doc_md="Aggregate generation and demand → MinIO gold/.",
     )
 
     platinum = BashOperator(
         task_id="platinum_serving_tables",
         bash_command=spark_submit_cmd("platinum_serving_tables.py", "--date {{ ds }}"),
+        doc_md="Build serving schema tables in MinIO gold/platinum_*/.",
     )
 
     load_postgres = PythonOperator(

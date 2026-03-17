@@ -12,6 +12,7 @@ from pipeline_runtime import (
     SUPPORTED_BACKFILL_STEPS,
     _floor_to_step,
     _format_cli_hour,
+    _format_cli_timestamp,
     _parse_utc,
     _retreat_step,
     current_airflow_log_fields,
@@ -100,10 +101,9 @@ def enqueue_backfill_jobs(dataset_id: str, max_pending_override: int | None = No
     if step not in SUPPORTED_BACKFILL_STEPS:
         raise ValueError(f"Unsupported backfill step '{step}'")
 
-    history_start = _floor_to_step(_parse_utc(backfill_config["start"]), "hour")
+    history_start = _floor_to_step(_parse_utc(backfill_config["start"]), step)
     pending_limit = max_pending_override if max_pending_override is not None else int(backfill_config.get("max_pending_chunks", 14))
-    boundary = _floor_to_step(datetime.now(timezone.utc), "hour")
-    current_week_start = _start_of_calendar_week(boundary)
+    boundary = _floor_to_step(datetime.now(timezone.utc), step if step in {"month", "year"} else "hour")
 
     inserted = 0
     open_window_count = 0
@@ -114,16 +114,26 @@ def enqueue_backfill_jobs(dataset_id: str, max_pending_override: int | None = No
         existing_jobs = _load_existing_backfill_jobs(cur, dataset_id, history_start, boundary)
 
         candidate_windows: list[tuple[datetime, datetime]] = []
-        if boundary > current_week_start:
-            candidate_windows.append((max(history_start, current_week_start), boundary))
+        if step in {"hour", "day"}:
+            current_week_start = _start_of_calendar_week(boundary)
+            if boundary > current_week_start:
+                candidate_windows.append((max(history_start, current_week_start), boundary))
 
-        candidate_end = current_week_start
-        while len(candidate_windows) < pending_limit and candidate_end > history_start:
-            candidate_start = max(history_start, candidate_end - timedelta(days=7))
-            if candidate_start >= candidate_end:
-                break
-            candidate_windows.append((candidate_start, candidate_end))
-            candidate_end = candidate_start
+            candidate_end = current_week_start
+            while len(candidate_windows) < pending_limit and candidate_end > history_start:
+                candidate_start = max(history_start, candidate_end - timedelta(days=7))
+                if candidate_start >= candidate_end:
+                    break
+                candidate_windows.append((candidate_start, candidate_end))
+                candidate_end = candidate_start
+        else:
+            candidate_end = boundary
+            while len(candidate_windows) < pending_limit and candidate_end > history_start:
+                candidate_start = max(history_start, _retreat_step(candidate_end, step))
+                if candidate_start >= candidate_end:
+                    break
+                candidate_windows.append((candidate_start, candidate_end))
+                candidate_end = candidate_start
 
         for candidate_start, candidate_end in candidate_windows:
             status = existing_jobs.get((candidate_start, candidate_end))
@@ -160,7 +170,7 @@ def enqueue_backfill_jobs(dataset_id: str, max_pending_override: int | None = No
             dataset_id=dataset_id,
             inserted=inserted,
             pending_limit=pending_limit,
-            step="calendar_week",
+            step=step if step in {"month", "year"} else "calendar_week",
             history_start=history_start.isoformat(),
             chunk_end_utc=boundary.isoformat(),
         ),
@@ -208,6 +218,8 @@ def claim_next_backfill_chunk(dataset_id: str) -> dict[str, Any] | None:
         )
         return None
 
+    dataset = get_dataset(dataset_id)
+    step = (dataset.get("backfill") or {}).get("step", "day")
     job_id, claimed_dataset_id, chunk_start_utc, chunk_end_utc = row
     chunk_start_utc = chunk_start_utc.astimezone(timezone.utc)
     chunk_end_utc = chunk_end_utc.astimezone(timezone.utc)
@@ -226,8 +238,8 @@ def claim_next_backfill_chunk(dataset_id: str) -> dict[str, Any] | None:
         "dataset_id": claimed_dataset_id,
         "chunk_start_utc": chunk_start_utc.isoformat(),
         "chunk_end_utc": chunk_end_utc.isoformat(),
-        "chunk_start_cli": _format_cli_hour(chunk_start_utc),
-        "chunk_end_cli": _format_cli_hour(chunk_end_utc),
+        "chunk_start_cli": _format_cli_hour(chunk_start_utc) if step in {"hour", "day"} else _format_cli_timestamp(chunk_start_utc),
+        "chunk_end_cli": _format_cli_hour(chunk_end_utc) if step in {"hour", "day"} else _format_cli_timestamp(chunk_end_utc),
     }
 
 

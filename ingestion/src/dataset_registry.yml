@@ -34,3 +34,29 @@ datasets:
       start: "2020-01-01T00:00:00+00:00"
       step: day
       max_pending_chunks: 14
+  - id: electricity_power_operational_data
+    route: electricity/electric-power-operational-data
+    topic: eia_electricity_power_operational_data
+    frequency: monthly
+    incremental_schedule: "0 0 1 * *"
+
+    data_columns:
+      - ash-content
+      - consumption-for-eg
+      - generation
+      - heat-content
+
+    default_facets:
+      location:
+        - US
+
+    bronze_output_path: s3a://bronze/electricity_power_operational_data
+    bronze_checkpoint_path: s3a://bronze/checkpoints/electricity_power_operational_data
+    silver_output_path: s3a://silver/electric_power_operational_data
+    gold_output_path: s3a://gold/facts/electric_power_operations_monthly
+    platinum_table: platinum.electric_power_operations_monthly
+
+    backfill:
+      start: "2010-01-01T00:00:00+00:00"
+      step: month
+      max_pending_chunks: 10

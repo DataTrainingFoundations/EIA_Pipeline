@@ -6,7 +6,7 @@ from common.io import write_partitioned_parquet
 from jobs.gold_region_fuel_serving_hourly import build_region_hourly_metrics, build_respondent_dimension
 from jobs.platinum_region_demand_daily import build_region_demand_daily
 from jobs.platinum_resource_planning_daily import build_resource_planning_daily
-from jobs.silver_clean_transform import clean_region_data
+from jobs.silver_clean_transform import clean_region_data, validate_non_empty
 
 
 def test_clean_region_data_deduplicates_event_ids(spark_session) -> None:
@@ -49,6 +49,43 @@ def test_clean_region_data_rejects_invalid_units(spark_session) -> None:
 
     with pytest.raises(ValueError, match="unsupported values"):
         clean_region_data(bronze_df)
+
+
+def test_validate_non_empty_ignores_identical_replayed_event_ids(spark_session) -> None:
+    bronze_df = spark_session.createDataFrame(
+        [
+            {
+                "event_id": "evt-1",
+                "dataset": "electricity_region_data",
+                "payload": {
+                    "period": "2026-01-01T00",
+                    "respondent": "PJM",
+                    "respondent-name": "PJM",
+                    "type": "D",
+                    "value": "100",
+                    "value-units": "MWh",
+                },
+                "ingestion_ts": datetime(2026, 1, 1, 1, 0, tzinfo=timezone.utc),
+            },
+            {
+                "event_id": "evt-1",
+                "dataset": "electricity_region_data",
+                "payload": {
+                    "period": "2026-01-01T00",
+                    "respondent": "PJM",
+                    "respondent-name": "PJM",
+                    "type": "D",
+                    "value": "100",
+                    "value-units": "MWh",
+                },
+                "ingestion_ts": datetime(2026, 1, 1, 1, 5, tzinfo=timezone.utc),
+            },
+        ]
+    )
+
+    cleaned_df = clean_region_data(bronze_df)
+
+    validate_non_empty(bronze_df, cleaned_df, "electricity_region_data", "silver.region_data")
 
 
 def test_region_hourly_metrics_aggregates_by_period_and_respondent(spark_session) -> None:

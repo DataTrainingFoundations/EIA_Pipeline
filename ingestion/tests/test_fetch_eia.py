@@ -56,8 +56,7 @@ def test_build_query_params_applies_facets() -> None:
         end="2026-03-01T03",
         offset=0,
         length=5000,
-        default_facets={"type": ["D"]},
-        data_columns=["value"],
+        dataset_config={"default_facets": {"type": ["D"]}, "data_columns": ["value"]},
         respondent="PJM",
     )
     assert params["facets[type][]"] == ["D"]
@@ -68,6 +67,13 @@ def test_build_query_params_applies_facets() -> None:
 
 def test_resolve_api_window_bounds_converts_exclusive_hourly_end() -> None:
     assert resolve_api_window_bounds("2026-03-15T14", "2026-03-15T15") == ("2026-03-15T14", "2026-03-15T14")
+
+
+def test_resolve_api_window_bounds_converts_monthly_window() -> None:
+    assert resolve_api_window_bounds("2026-02-01T00:00:00+00:00", "2026-03-01T00:00:00+00:00", "monthly") == (
+        "2026-01-31",
+        "2026-02-01",
+    )
 
 
 def test_resolve_api_window_bounds_rejects_empty_or_negative_window() -> None:
@@ -146,3 +152,12 @@ def test_build_event_envelope_uses_deterministic_event_id() -> None:
 def test_build_event_rejects_invalid_period() -> None:
     with pytest.raises(ValueError):
         build_event("electricity_region_data", "electricity/rto/region-data", {"period": "not-a-date"})
+
+
+def test_build_event_accepts_monthly_period() -> None:
+    event = build_event(
+        "electricity_power_operational_data",
+        "electricity/electric-power-operational-data",
+        {"period": "2026-02", "generation": "100"},
+    )
+    assert event["event_timestamp"] == "2026-02-01T00:00:00+00:00"

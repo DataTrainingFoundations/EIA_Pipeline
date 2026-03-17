@@ -58,6 +58,13 @@ class WarehouseStore:
             where date >= %s::date and date < %s::date
             {respondent_filter}
             """
+        elif request.dataset_id == "platinum.electric_power_operations_monthly":
+            query = f"""
+            select period as period_start_utc, location as respondent, concat(sector_id, '|', fueltype_id) as dimension_value
+            from platinum.electric_power_operations_monthly
+            where period >= %s and period < %s
+            {respondent_filter}
+            """
         else:
             return pd.DataFrame(columns=["grain_key", "period_start_utc", "respondent", "dimension_value"])
 
@@ -83,5 +90,7 @@ class WarehouseStore:
         select 'platinum.grid_operations_hourly', count(*) from platinum.grid_operations_hourly
         union all
         select 'platinum.resource_planning_daily', count(*) from platinum.resource_planning_daily
+        union all
+        select 'platinum.electric_power_operations_monthly', count(*) from platinum.electric_power_operations_monthly
         """
         return self.read_sql(query)

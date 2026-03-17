@@ -94,3 +94,66 @@ def test_build_expected_fuel_gold_keys(monkeypatch) -> None:  # noqa: ANN001
     gold_df = build_expected_stage_keys(_config(), request, dataset)
     assert len(gold_df) == 2
     assert set(gold_df["dimension_value"]) == {"NG", "SUN"}
+
+
+def test_build_expected_power_gold_and_platinum_keys(monkeypatch) -> None:  # noqa: ANN001
+    dataset = DatasetRegistryEntry(
+        dataset_id="electricity_power_operational_data",
+        route="electricity/electric-power-operational-data",
+        topic="topic",
+        frequency="monthly",
+        data_columns=("ash-content", "consumption-for-eg", "generation", "heat-content"),
+        default_facets={"location": ["US"]},
+        bronze_output_path="s3a://bronze/electricity_power_operational_data",
+        silver_output_path="s3a://silver/electric_power_operational_data",
+        gold_output_path="s3a://gold/facts/electric_power_operations_monthly",
+    )
+    rows = [
+        {
+            "period": "2026-01",
+            "location": "US",
+            "stateDescription": "U.S. Total",
+            "sectorid": "1",
+            "sectorDescription": "Electric Utility",
+            "fueltypeid": "COL",
+            "fuelTypeDescription": "Coal",
+            "ash-content": "7.5",
+            "consumption-for-eg": "12.3",
+            "generation": "45.6",
+            "heat-content": "20.1",
+        },
+        {
+            "period": "2026-01",
+            "location": "US",
+            "stateDescription": "U.S. Total",
+            "sectorid": "1",
+            "sectorDescription": "Electric Utility",
+            "fueltypeid": "NG",
+            "fuelTypeDescription": "Natural Gas",
+            "ash-content": None,
+            "consumption-for-eg": "8.1",
+            "generation": "22.2",
+            "heat-content": "1.02",
+        },
+    ]
+    monkeypatch.setattr("eia_client.fetch_dataset_rows", lambda *args, **kwargs: rows)
+
+    gold_request = ComparisonRequest(
+        dataset_id="electricity_power_operational_data",
+        stage="gold",
+        start_utc=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        end_utc=datetime(2026, 2, 1, tzinfo=timezone.utc),
+    )
+    gold_df = build_expected_stage_keys(_config(), gold_request, dataset)
+    assert len(gold_df) == 2
+    assert set(gold_df["dimension_value"]) == {"1|COL", "1|NG"}
+
+    platinum_request = ComparisonRequest(
+        dataset_id="platinum.electric_power_operations_monthly",
+        stage="platinum",
+        start_utc=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        end_utc=datetime(2026, 2, 1, tzinfo=timezone.utc),
+    )
+    platinum_df = build_expected_stage_keys(_config(), platinum_request, dataset)
+    assert len(platinum_df) == 2
+    assert set(platinum_df["respondent"]) == {"US"}

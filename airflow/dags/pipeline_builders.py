@@ -109,6 +109,24 @@ def build_curated_gold_command(dataset_id: str, start_expression: str, end_expre
     )
 
 
+def build_power_curated_gold_command(dataset: dict[str, str], start_expression: str, end_expression: str) -> str:
+    return build_spark_submit_command(
+        "gold_power_operations_monthly.py",
+        packages=SPARK_PACKAGES,
+        job_name="gold_power_operations_monthly",
+        application_args=[
+            "--silver-input-path",
+            dataset["silver_output_path"],
+            "--gold-output-path",
+            dataset["gold_output_path"],
+            "--start",
+            start_expression,
+            "--end",
+            end_expression,
+        ],
+    )
+
+
 def build_region_daily_platinum_command(stage_table: str, start_expression: str, end_expression: str) -> str:
     return build_spark_submit_command(
         "platinum_region_demand_daily.py",
@@ -119,6 +137,26 @@ def build_region_daily_platinum_command(stage_table: str, start_expression: str,
             GOLD_REGION_FACT_HOURLY_PATH,
             "--platinum-table",
             "platinum.region_demand_daily",
+            "--stage-table",
+            stage_table,
+            "--start",
+            start_expression,
+            "--end",
+            end_expression,
+        ],
+    )
+
+
+def build_power_operations_monthly_platinum_command(dataset: dict[str, str], stage_table: str, start_expression: str, end_expression: str) -> str:
+    return build_spark_submit_command(
+        "platinum_power_operations_monthly.py",
+        packages=SPARK_PACKAGES_WITH_POSTGRES,
+        job_name="platinum_power_operations_monthly",
+        application_args=[
+            "--gold-input-path",
+            dataset["gold_output_path"],
+            "--platinum-table",
+            dataset["platinum_table"],
             "--stage-table",
             stage_table,
             "--start",

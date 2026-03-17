@@ -13,6 +13,8 @@ import os
 from typing import Any, Iterable, Mapping
 
 from kafka import KafkaProducer
+from kafka.admin import KafkaAdminClient, NewTopic
+from kafka.errors import TopicAlreadyExistsError
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +54,43 @@ def create_producer(
     )
 
 
+def create_admin_client(
+    broker: str | None = None,
+    security_protocol: str | None = None,
+) -> KafkaAdminClient:
+    """Create the configured Kafka admin client used for topic management."""
+
+    bootstrap_servers = broker or os.getenv("KAFKA_BROKER", "kafka:9092")
+    protocol = security_protocol or os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT")
+    logger.info("Creating Kafka admin client bootstrap_servers=%s security_protocol=%s", bootstrap_servers, protocol)
+    return KafkaAdminClient(bootstrap_servers=bootstrap_servers, security_protocol=protocol)
+
+
+def ensure_topic_exists(
+    topic: str,
+    admin_client: KafkaAdminClient | None = None,
+) -> None:
+    """Create the Kafka topic on demand so Bronze can always subscribe safely."""
+
+    owns_admin = admin_client is None
+    admin_client = admin_client or create_admin_client()
+    try:
+        if topic in set(admin_client.list_topics()):
+            return
+        logger.info("Creating Kafka topic topic=%s", topic)
+        admin_client.create_topics([NewTopic(name=topic, num_partitions=1, replication_factor=1)])
+    except TopicAlreadyExistsError:
+        logger.info("Kafka topic already exists topic=%s", topic)
+    finally:
+        if owns_admin:
+            admin_client.close()
+
+
 def publish_events(
     topic: str,
     events: Iterable[Mapping[str, Any]],
     producer: KafkaProducer | None = None,
+    admin_client: KafkaAdminClient | None = None,
 ) -> int:
     """Publish a batch of ingestion events and wait for Kafka acknowledgements.
 
@@ -78,6 +113,7 @@ def publish_events(
     sent = 0
     logger.info("Publishing Kafka events topic=%s owns_producer=%s", topic, owns_producer)
     try:
+        ensure_topic_exists(topic, admin_client=admin_client)
         for event in events:
             event_id = event["event_id"]
             futures.append(producer.send(topic, key=event_id, value=dict(event)))

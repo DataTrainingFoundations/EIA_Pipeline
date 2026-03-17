@@ -218,6 +218,117 @@ def _build_fuel_gold(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def _power_frame(rows: list[dict[str, Any]], dataset: DatasetRegistryEntry) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "event_id",
+                "period_start_utc",
+                "location",
+                "location_name",
+                "sector_id",
+                "sector_name",
+                "fueltype_id",
+                "fueltype_name",
+                "ash_content_pct",
+                "consumption_for_eg_thousand_units",
+                "generation_thousand_mwh",
+                "heat_content_btu_per_unit",
+            ]
+        )
+
+    return pd.DataFrame.from_records(
+        [
+            {
+                "event_id": build_event_id(dataset.dataset_id, dataset.route, row),
+                "period_start_utc": _parse_period(row.get("period")),
+                "location": row.get("location"),
+                "location_name": row.get("stateDescription"),
+                "sector_id": row.get("sectorid"),
+                "sector_name": row.get("sectorDescription"),
+                "fueltype_id": row.get("fueltypeid"),
+                "fueltype_name": row.get("fuelTypeDescription"),
+                "ash_content_pct": pd.to_numeric(row.get("ash-content"), errors="coerce"),
+                "consumption_for_eg_thousand_units": pd.to_numeric(row.get("consumption-for-eg"), errors="coerce"),
+                "generation_thousand_mwh": pd.to_numeric(row.get("generation"), errors="coerce"),
+                "heat_content_btu_per_unit": pd.to_numeric(row.get("heat-content"), errors="coerce"),
+            }
+            for row in rows
+        ]
+    )
+
+
+def _build_power_silver(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df.copy()
+    required = ["period_start_utc", "location", "sector_id", "fueltype_id", "location_name", "sector_name", "fueltype_name"]
+    return df.dropna(subset=required).drop_duplicates(subset=["event_id"])
+
+
+def _build_power_gold(df: pd.DataFrame) -> pd.DataFrame:
+    silver_df = _build_power_silver(df)
+    if silver_df.empty:
+        return pd.DataFrame(
+            columns=[
+                "period_start_utc",
+                "location",
+                "location_name",
+                "sector_id",
+                "sector_name",
+                "fueltype_id",
+                "fueltype_name",
+            ]
+        )
+
+    silver_df = silver_df.sort_values(
+        ["period_start_utc", "location", "sector_id", "fueltype_id", "event_id"]
+    ).drop_duplicates(subset=["period_start_utc", "location", "sector_id", "fueltype_id"], keep="last")
+
+    gold_df = silver_df.copy()
+    gold_df["generation_mwh"] = gold_df["generation_thousand_mwh"].clip(lower=0.0) * 1000.0
+    gold_df["consumption_for_eg_thousand_units"] = gold_df["consumption_for_eg_thousand_units"].clip(lower=0.0)
+    gold_df["ash_content_pct"] = gold_df["ash_content_pct"].clip(lower=0.0)
+    gold_df["heat_content_btu_per_unit"] = gold_df["heat_content_btu_per_unit"].clip(lower=0.0)
+    return gold_df[
+        [
+            "period_start_utc",
+            "location",
+            "location_name",
+            "sector_id",
+            "sector_name",
+            "fueltype_id",
+            "fueltype_name",
+            "generation_mwh",
+            "consumption_for_eg_thousand_units",
+            "ash_content_pct",
+            "heat_content_btu_per_unit",
+        ]
+    ].reset_index(drop=True)
+
+
+def _power_keys(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame(columns=["grain_key", "period_start_utc", "respondent", "dimension_value"])
+
+    normalized = df.copy()
+    normalized["period_start_utc"] = pd.to_datetime(normalized["period_start_utc"], utc=True, errors="coerce")
+    normalized["respondent"] = normalized["location"].astype("string")
+    normalized["dimension_value"] = (
+        normalized["sector_id"].astype("string").fillna("")
+        + "|"
+        + normalized["fueltype_id"].astype("string").fillna("")
+    )
+    normalized = normalized.dropna(subset=["period_start_utc", "respondent"])
+    normalized["grain_key"] = (
+        normalized["period_start_utc"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        + "|"
+        + normalized["respondent"].fillna("")
+        + "|"
+        + normalized["dimension_value"].fillna("")
+    )
+    return normalized[["grain_key", "period_start_utc", "respondent", "dimension_value"]]
+
+
 def build_expected_stage_keys(config: AppConfig, request: ComparisonRequest, dataset: DatasetRegistryEntry) -> pd.DataFrame:
     rows = fetch_dataset_rows(config, dataset, request)
 
@@ -251,5 +362,16 @@ def build_expected_stage_keys(config: AppConfig, request: ComparisonRequest, dat
             return _standardize_keys(_build_fuel_silver(raw_df).rename(columns={"fueltype": "dimension_value"}), "dimension_value")
         if request.stage == "gold":
             return _standardize_keys(_build_fuel_gold(raw_df).rename(columns={"fueltype": "dimension_value"}), "dimension_value")
+
+    if dataset.dataset_id == "electricity_power_operational_data":
+        raw_df = _power_frame(rows, dataset)
+        if request.stage == "bronze":
+            return _power_keys(raw_df)
+        if request.stage == "silver":
+            return _power_keys(_build_power_silver(raw_df))
+        if request.stage == "gold":
+            return _power_keys(_build_power_gold(raw_df))
+        if request.stage == "platinum" and request.dataset_id == "platinum.electric_power_operations_monthly":
+            return _power_keys(_build_power_gold(raw_df)).drop_duplicates(subset=["grain_key"]).reset_index(drop=True)
 
     return pd.DataFrame(columns=["grain_key", "period_start_utc", "respondent", "dimension_value"])

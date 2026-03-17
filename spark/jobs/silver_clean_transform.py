@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 from pyspark.sql import Column, DataFrame, Window
-from pyspark.sql.functions import coalesce, col, count, current_timestamp, lower, row_number, to_date, to_timestamp, trim
+from pyspark.sql.functions import coalesce, col, count, countDistinct, current_timestamp, lower, row_number, to_date, to_timestamp, trim
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -25,9 +25,23 @@ from common.spark_session import build_spark_session
 from common.windowing import filter_time_window
 
 logger = logging.getLogger(__name__)
-SUPPORTED_DATASETS = ["electricity_region_data", "electricity_fuel_type_data"]
+SUPPORTED_DATASETS = ["electricity_region_data", "electricity_fuel_type_data", "electricity_power_operational_data"]
 ALLOWED_REGION_TYPES = ["D", "DF"]
 ALLOWED_VALUE_UNITS = ["mwh", "megawatthours"]
+ALLOWED_POWER_ASH_UNITS = ["percent"]
+ALLOWED_POWER_CONSUMPTION_UNITS = [
+    "thousand physical units",
+    "thousand short tons",
+    "thousand mcf",
+    "thousand barrels",
+]
+ALLOWED_POWER_GENERATION_UNITS = ["thousand megawatthours"]
+ALLOWED_POWER_HEAT_CONTENT_UNITS = [
+    "btu per physical units",
+    "btu per short tons",
+    "btu per mcf",
+    "btu per barrels",
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -48,6 +62,7 @@ def _parsed_period(column: Column) -> Column:
 
     return coalesce(
         to_timestamp(column),
+        to_timestamp(column, "yyyy-MM"),
         to_timestamp(column, "yyyy-MM-dd'T'HH"),
         to_timestamp(column, "yyyy-MM-dd'T'HH:mm"),
         to_timestamp(column, "yyyy-MM-dd'T'HH:mm:ss"),
@@ -77,7 +92,8 @@ def _validate_cleaning_ratio(raw_df: DataFrame, cleaned_df: DataFrame, dataset_i
     """Fail when a dataset window loses too many rows during cleaning."""
 
     raw_dataset_df = raw_df.filter(col("dataset") == dataset_id)
-    raw_count = raw_dataset_df.select(count("*").alias("row_count")).collect()[0]["row_count"]
+    # Bronze windows can contain identical replayed rows for the same event_id.
+    raw_count = raw_dataset_df.select(countDistinct("event_id").alias("row_count")).collect()[0]["row_count"]
     if raw_count == 0:
         return
     cleaned_count = cleaned_df.select(count("*").alias("row_count")).collect()[0]["row_count"]
@@ -166,6 +182,70 @@ def clean_fuel_type_data(df: DataFrame) -> DataFrame:
     return cleaned_df
 
 
+def clean_power_operational_data(df: DataFrame) -> DataFrame:
+    """Normalize electric power operational rows into the Silver power schema."""
+
+    parsed_period = _parsed_period(col("payload")["period"])
+    extracted_df = (
+        df.filter(col("dataset") == "electricity_power_operational_data")
+        .select(
+            col("event_id"),
+            parsed_period.alias("period"),
+            _normalized_text(col("payload")["location"]).alias("location"),
+            _normalized_text(col("payload")["stateDescription"]).alias("location_name"),
+            _normalized_text(col("payload")["sectorid"]).alias("sector_id"),
+            _normalized_text(col("payload")["sectorDescription"]).alias("sector_name"),
+            _normalized_text(col("payload")["fueltypeid"]).alias("fueltype_id"),
+            _normalized_text(col("payload")["fuelTypeDescription"]).alias("fueltype_name"),
+            col("payload")["ash-content"].cast("double").alias("ash_content_pct"),
+            _normalized_unit(col("payload")["ash-content-units"]).alias("ash_content_units"),
+            col("payload")["consumption-for-eg"].cast("double").alias("consumption_for_eg_thousand_units"),
+            _normalized_unit(col("payload")["consumption-for-eg-units"]).alias("consumption_for_eg_units"),
+            col("payload")["generation"].cast("double").alias("generation_thousand_mwh"),
+            _normalized_unit(col("payload")["generation-units"]).alias("generation_units"),
+            col("payload")["heat-content"].cast("double").alias("heat_content_btu_per_unit"),
+            _normalized_unit(col("payload")["heat-content-units"]).alias("heat_content_units"),
+            coalesce(col("ingestion_ts"), current_timestamp()).alias("loaded_at"),
+        )
+    )
+    assert_no_conflicting_records(
+        extracted_df.filter(col("event_id").isNotNull()),
+        ["event_id"],
+        [
+            "period",
+            "location",
+            "location_name",
+            "sector_id",
+            "sector_name",
+            "fueltype_id",
+            "fueltype_name",
+            "ash_content_pct",
+            "consumption_for_eg_thousand_units",
+            "generation_thousand_mwh",
+            "heat_content_btu_per_unit",
+        ],
+        "silver.electric_power_operational_data",
+    )
+    cleaned_df = (
+        extracted_df
+        .filter(col("period").isNotNull() & col("location").isNotNull() & col("sector_id").isNotNull() & col("fueltype_id").isNotNull())
+        .filter(col("location_name").isNotNull() & col("sector_name").isNotNull() & col("fueltype_name").isNotNull())
+        .transform(_latest_by_event)
+        .withColumn("event_date", to_date(col("period")))
+    )
+    assert_no_nulls(
+        cleaned_df,
+        ["event_id", "period", "location", "location_name", "sector_id", "sector_name", "fueltype_id", "fueltype_name", "event_date"],
+        "silver.electric_power_operational_data",
+    )
+    assert_allowed_values(cleaned_df, "ash_content_units", ALLOWED_POWER_ASH_UNITS, "silver.electric_power_operational_data")
+    assert_allowed_values(cleaned_df, "consumption_for_eg_units", ALLOWED_POWER_CONSUMPTION_UNITS, "silver.electric_power_operational_data")
+    assert_allowed_values(cleaned_df, "generation_units", ALLOWED_POWER_GENERATION_UNITS, "silver.electric_power_operational_data")
+    assert_allowed_values(cleaned_df, "heat_content_units", ALLOWED_POWER_HEAT_CONTENT_UNITS, "silver.electric_power_operational_data")
+    assert_unique_keys(cleaned_df, ["event_id"], "silver.electric_power_operational_data")
+    return cleaned_df
+
+
 def validate_non_empty(raw_df: DataFrame, cleaned_df: DataFrame, dataset_id: str, dataset_name: str) -> None:
     """Public validation wrapper kept for tests and pipeline readability."""
 
@@ -240,6 +320,23 @@ def main() -> None:
             args.end,
             raw_count,
             fuel_df.count(),
+        )
+
+    if "electricity_power_operational_data" in datasets_to_run:
+        power_df = clean_power_operational_data(bronze_df)
+        if args.validation_only:
+            validate_non_empty(bronze_df, power_df, "electricity_power_operational_data", "silver.electric_power_operational_data")
+        else:
+            validate_non_empty(bronze_df, power_df, "electricity_power_operational_data", "silver.electric_power_operational_data")
+            write_partitioned_dataset(power_df, f"{args.silver_base_path}/electric_power_operational_data")
+        logger.info(
+            "Processed Silver dataset dataset_id=electricity_power_operational_data input_path=%s output_path=%s start=%s end=%s raw_count=%s clean_count=%s",
+            bronze_root,
+            f"{args.silver_base_path}/electric_power_operational_data",
+            args.start,
+            args.end,
+            raw_count,
+            power_df.count(),
         )
 
     log_job_complete(

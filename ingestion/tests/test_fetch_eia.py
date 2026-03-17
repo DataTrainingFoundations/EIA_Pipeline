@@ -69,6 +69,14 @@ def test_resolve_api_window_bounds_converts_exclusive_hourly_end() -> None:
     assert resolve_api_window_bounds("2026-03-15T14", "2026-03-15T15") == ("2026-03-15T14", "2026-03-15T14")
 
 
+def test_resolve_api_window_bounds_extends_current_day_end_for_region_forecast() -> None:
+    assert resolve_api_window_bounds(
+        "2026-03-17T03",
+        "2026-03-17T04",
+        hourly_window_mode="current_day_end",
+    ) == ("2026-03-17T03", "2026-03-17T23")
+
+
 def test_resolve_api_window_bounds_converts_monthly_window() -> None:
     assert resolve_api_window_bounds("2026-02-01T00:00:00+00:00", "2026-03-01T00:00:00+00:00", "monthly") == (
         "2026-01-31",

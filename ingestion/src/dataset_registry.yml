@@ -3,6 +3,7 @@ datasets:
     route: electricity/rto/region-data
     topic: eia_electricity_region_data
     frequency: hourly
+    hourly_window_mode: current_day_end
     incremental_schedule: "@hourly"
     data_columns:
       - value

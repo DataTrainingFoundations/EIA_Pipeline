@@ -68,7 +68,7 @@ def build_incremental_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
 
     cli_start_expr = "{{ data_interval_start.in_timezone('UTC').strftime('%Y-%m-%dT%H') }}"
     cli_end_expr = "{{ data_interval_end.in_timezone('UTC').strftime('%Y-%m-%dT%H') }}"
-    if dataset.get("frequency") != "hourly":
+    if dataset.get("frequency", "hourly") != "hourly":
         cli_start_expr = "{{ data_interval_start.in_timezone('UTC').isoformat() }}"
         cli_end_expr = "{{ data_interval_end.in_timezone('UTC').isoformat() }}"
 
@@ -84,6 +84,7 @@ def build_incremental_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
     ) as dag:
         start_expr = "{{ data_interval_start.in_timezone('UTC').isoformat() }}"
         end_expr = "{{ data_interval_end.in_timezone('UTC').isoformat() }}"
+        region_day_start_expr = "{{ data_interval_start.in_timezone('UTC').replace(hour=0, minute=0, second=0, microsecond=0).isoformat() }}"
 
         ingest = BashOperator(
             task_id="ingest_to_kafka",
@@ -169,9 +170,10 @@ def build_incremental_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
                 )
             else:
                 stage_table = "platinum.region_demand_daily_stage_{{ ts_nodash | lower }}"
+                platinum_start_expr = region_day_start_expr if dataset_id == "electricity_region_data" else start_expr
                 platinum = BashOperator(
                     task_id="spark_platinum_stage",
-                    bash_command=build_region_daily_platinum_command(stage_table, start_expr, end_expr),
+                    bash_command=build_region_daily_platinum_command(stage_table, platinum_start_expr, end_expr),
                 )
                 validate_stage_rows = build_validate_rows_task(
                     "validate_platinum_stage_rows",

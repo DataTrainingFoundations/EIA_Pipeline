@@ -13,6 +13,7 @@ from typing import Any
 import yaml
 
 SUPPORTED_BACKFILL_STEPS = {"hour", "day", "month", "year"}
+SUPPORTED_HOURLY_WINDOW_MODES = {"interval", "current_day_end"}
 
 
 def load_dataset_registry(path: Path) -> dict[str, dict[str, Any]]:
@@ -75,4 +76,11 @@ def validate_dataset_registry(registry: dict[str, dict[str, Any]]) -> None:
             supported_steps = ", ".join(sorted(SUPPORTED_BACKFILL_STEPS))
             raise ValueError(
                 f"Dataset '{dataset_id}' uses unsupported backfill step '{step}'. Supported: {supported_steps}"
+            )
+
+        hourly_window_mode = dataset.get("hourly_window_mode")
+        if hourly_window_mode and hourly_window_mode not in SUPPORTED_HOURLY_WINDOW_MODES:
+            supported_modes = ", ".join(sorted(SUPPORTED_HOURLY_WINDOW_MODES))
+            raise ValueError(
+                f"Dataset '{dataset_id}' uses unsupported hourly window mode '{hourly_window_mode}'. Supported: {supported_modes}"
             )

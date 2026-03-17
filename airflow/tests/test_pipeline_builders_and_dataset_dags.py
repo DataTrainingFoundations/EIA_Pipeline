@@ -203,7 +203,9 @@ def test_dataset_dag_builders_include_expected_tasks_for_region_and_fuel(monkeyp
     assert "spark_platinum_stage" not in incremental_fuel.task_dict
     assert "spark_silver_batch" in incremental_power.task_dict
     assert "spark_curated_gold_batch" in incremental_power.task_dict
+    assert incremental_region.get_task("ingest_to_kafka").bash_command.endswith("--start {{ data_interval_start.in_timezone('UTC').strftime('%Y-%m-%dT%H') }} --end {{ data_interval_end.in_timezone('UTC').strftime('%Y-%m-%dT%H') }} --page-size 5000 --max-pages 20")
     assert incremental_region.get_task("spark_curated_gold_batch").downstream_task_ids == {"spark_platinum_stage"}
+    assert '--start "{{ data_interval_start.in_timezone(\'UTC\').replace(hour=0, minute=0, second=0, microsecond=0).isoformat() }}" --end "{{ data_interval_end.in_timezone(\'UTC\').isoformat() }}"' in incremental_region.get_task("spark_platinum_stage").bash_command
     assert incremental_region.get_task("spark_bronze_batch").pool == "electricity_region_data_bronze_write"
     assert incremental_fuel.get_task("spark_bronze_batch").pool == "electricity_fuel_type_data_bronze_write"
     assert "gold_power_operations_monthly.py" in incremental_power.get_task("spark_curated_gold_batch").bash_command

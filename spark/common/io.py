@@ -5,6 +5,8 @@ from __future__ import annotations
 import time
 
 from pyspark.sql import DataFrame
+from pyspark.sql import Window
+from pyspark.sql import functions as F
 
 
 def path_exists(spark, path_str: str) -> bool:  # noqa: ANN001
@@ -123,6 +125,46 @@ def write_partitioned_parquet(df: DataFrame, output_path: str, partition_column:
         return
     (
         df.write.mode("overwrite")
+        .option("partitionOverwriteMode", "dynamic")
+        .partitionBy(partition_column)
+        .parquet(output_path)
+    )
+
+
+def merge_partitioned_parquet(
+    df: DataFrame,
+    output_path: str,
+    *,
+    merge_keys: list[str],
+    freshness_columns: list[str],
+    partition_column: str = "event_date",
+) -> None:
+    """Merge touched partitions with existing parquet rows before overwrite."""
+
+    if df.isEmpty():
+        return
+
+    spark = df.sparkSession
+    partition_values = [row[partition_column] for row in df.select(partition_column).dropna().distinct().collect()]
+    if not partition_values:
+        return
+
+    partition_paths = [f"{output_path.rstrip('/')}/{partition_column}={partition_value}" for partition_value in partition_values]
+    existing_paths = [path for path in partition_paths if path_exists(spark, path)]
+    combined_df = df
+    if existing_paths:
+        existing_df = spark.read.option("basePath", output_path).parquet(*existing_paths)
+        combined_df = existing_df.unionByName(df, allowMissingColumns=True)
+
+    ordering = [F.col(column_name).desc_nulls_last() for column_name in freshness_columns]
+    merge_window = Window.partitionBy(*merge_keys).orderBy(*ordering)
+    merged_df = (
+        combined_df.withColumn("_merge_rank", F.row_number().over(merge_window))
+        .filter(F.col("_merge_rank") == 1)
+        .drop("_merge_rank")
+    )
+    (
+        merged_df.write.mode("overwrite")
         .option("partitionOverwriteMode", "dynamic")
         .partitionBy(partition_column)
         .parquet(output_path)

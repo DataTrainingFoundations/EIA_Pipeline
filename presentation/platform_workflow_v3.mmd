@@ -1,0 +1,75 @@
+flowchart LR
+    classDef region fill:#e6f2ff,stroke:#2d6db3,color:#14345a,stroke-width:1.5px;
+    classDef fuel fill:#eaf7ea,stroke:#2f7a44,color:#163d20,stroke-width:1.5px;
+    classDef power fill:#fff0dc,stroke:#b46b00,color:#4b2f00,stroke-width:1.5px;
+    classDef shared fill:#f4f4f4,stroke:#666,color:#222,stroke-width:1.2px;
+    classDef serving fill:#fdf2d0,stroke:#9b6b00,color:#4d3400,stroke-width:1.5px;
+    classDef app fill:#f9e6ef,stroke:#b33c75,color:#5a1738,stroke-width:1.5px;
+
+    AIRFLOW["Airflow orchestration<br/>incrementals, backfills, serving DAGs"]:::shared
+    OPS["ops metadata<br/>backfill / coverage / repair"]:::shared
+    CKPT["Bronze checkpoints in MinIO<br/>offsets.json per dataset"]:::shared
+    VERIFY["bronze verification / repair<br/>available but not auto-unpaused"]:::shared
+
+    subgraph REGION["Region branch"]
+        direction LR
+        ER["EIA region API"]:::region --> FR["fetch_eia"]:::region --> KR["Kafka region topic"]:::region --> BR["Bronze region events"]:::region --> SR["Silver region_data"]:::region --> GR["Gold region demand / forecast fact"]:::region --> RD["platinum.region_demand_daily"]:::serving
+    end
+
+    subgraph FUEL["Fuel branch"]
+        direction LR
+        EF["EIA fuel API"]:::fuel --> FF["fetch_eia"]:::fuel --> KF["Kafka fuel topic"]:::fuel --> BF["Bronze fuel events"]:::fuel --> SF["Silver fuel_type_data"]:::fuel --> GF["Gold fuel generation fact"]:::fuel
+        SF --> FD["Gold fuel_type dimension"]:::fuel
+    end
+
+    subgraph POWER["Monthly power branch"]
+        direction LR
+        EP["EIA power API"]:::power --> FP["fetch_eia"]:::power --> KP["Kafka power topic"]:::power --> BP["Bronze power events"]:::power --> SP["Silver electric_power_operational_data"]:::power --> GP["Gold electric_power_operations_monthly"]:::power --> PM["platinum.electric_power_operations_monthly"]:::serving
+    end
+
+    RESP["Gold respondent dimension"]:::shared
+    GRID["platinum.grid_operations_hourly"]:::serving
+    ALERTS["platinum.grid_operations_alert_hourly"]:::serving
+    PLAN["platinum.resource_planning_daily"]:::serving
+
+    BIZ["Business Streamlit app"]:::app
+    GRID_PAGE["Grid operations page"]:::app
+    PLAN_PAGE["Resource planning page"]:::app
+    ADMIN["Admin Streamlit app"]:::app
+    ADMIN_VIEW["Comparisons / Airflow / logs"]:::app
+
+    AIRFLOW --> FR
+    AIRFLOW --> FF
+    AIRFLOW --> FP
+    AIRFLOW -. backfill and repair state .-> OPS
+    AIRFLOW -. dormant path .-> VERIFY
+    VERIFY -. writes status .-> OPS
+
+    BR -. offsets.json .-> CKPT
+    BF -. offsets.json .-> CKPT
+    BP -. offsets.json .-> CKPT
+
+    SR --> RESP
+    SF --> RESP
+
+    GR --> GRID
+    GF --> GRID
+    GR --> ALERTS
+    GF --> ALERTS
+    GR --> PLAN
+    GF --> PLAN
+    FD --> PLAN
+    RESP --> PLAN
+
+    BIZ --> GRID_PAGE
+    BIZ --> PLAN_PAGE
+    GRID --> GRID_PAGE
+    ALERTS --> GRID_PAGE
+    PLAN --> PLAN_PAGE
+
+    ADMIN --> ADMIN_VIEW
+    OPS --> ADMIN_VIEW
+    RD --> ADMIN_VIEW
+    GRID --> ADMIN_VIEW
+    PLAN --> ADMIN_VIEW
+    PM --> ADMIN_VIEW

@@ -1,0 +1,118 @@
+flowchart LR
+    classDef source fill:#f7f2e8,stroke:#8a5a00,color:#2d1f00,stroke-width:1px;
+    classDef orchestration fill:#e7f0ff,stroke:#2458a6,color:#0e2b57,stroke-width:1px;
+    classDef storage fill:#edf7ed,stroke:#2d7a3f,color:#163d20,stroke-width:1px;
+    classDef serving fill:#fff2cc,stroke:#9b6b00,color:#4d3400,stroke-width:1px;
+    classDef app fill:#fce8f1,stroke:#b33c75,color:#5a1738,stroke-width:1px;
+    classDef note fill:#f4f4f4,stroke:#666,color:#222,stroke-dasharray: 4 4;
+
+    subgraph SRC["External source"]
+        EIA_REGION["EIA API<br/>electricity/rto/region-data"]
+        EIA_FUEL["EIA API<br/>electricity/rto/fuel-type-data"]
+        EIA_POWER["EIA API<br/>electricity/electric-power-operational-data"]
+    end
+
+    subgraph DAGS["Airflow DAGs"]
+        INC_REGION["electricity_region_data_incremental"]
+        INC_FUEL["electricity_fuel_type_data_incremental"]
+        INC_POWER["electricity_power_operational_data_incremental"]
+        BF_REGION["electricity_region_data_backfill"]
+        BF_FUEL["electricity_fuel_type_data_backfill"]
+        BF_POWER["electricity_power_operational_data_backfill"]
+        GRID_DAG["platinum_grid_operations_hourly"]
+        PLAN_DAG["platinum_resource_planning_daily"]
+        VERIFY["bronze verification / repair<br/>present but not auto-unpaused"]
+    end
+
+    subgraph BUF["Fetch and buffer"]
+        FETCH_REGION["fetch_eia<br/>dataset=electricity_region_data"]
+        FETCH_FUEL["fetch_eia<br/>dataset=electricity_fuel_type_data"]
+        FETCH_POWER["fetch_eia<br/>dataset=electricity_power_operational_data"]
+        TOPIC_REGION["Kafka<br/>eia_electricity_region_data"]
+        TOPIC_FUEL["Kafka<br/>eia_electricity_fuel_type_data"]
+        TOPIC_POWER["Kafka<br/>eia_electricity_power_operational_data"]
+    end
+
+    subgraph LAKE["Spark + MinIO"]
+        BRONZE["Bronze<br/>dataset-partitioned raw events"]
+        CKPT["Bronze checkpoints<br/>offsets.json per dataset"]
+        SILVER["Silver<br/>cleaned parquet by event_date"]
+        GOLD_HOURLY["Gold hourly facts + dimensions<br/>region, fuel, respondent, fuel_type"]
+        GOLD_MONTHLY["Gold monthly fact<br/>electric_power_operations_monthly"]
+    end
+
+    subgraph PG["Postgres"]
+        OPS["ops metadata<br/>backfill / coverage / repair"]
+        REGION_DAILY["platinum.region_demand_daily"]
+        GRID_HOURLY["platinum.grid_operations_hourly"]
+        GRID_ALERTS["platinum.grid_operations_alert_hourly"]
+        PLAN_DAILY["platinum.resource_planning_daily"]
+        POWER_MONTHLY["platinum.electric_power_operations_monthly"]
+    end
+
+    subgraph UI["Streamlit apps"]
+        APP["business app"]
+        ADMIN["admin app"]
+        GRID_PAGE["grid operations page"]
+        PLAN_PAGE["resource planning page"]
+        ADMIN_TOOLS["comparisons / airflow / logs"]
+    end
+
+    EIA_REGION --> FETCH_REGION
+    EIA_FUEL --> FETCH_FUEL
+    EIA_POWER --> FETCH_POWER
+
+    INC_REGION --> FETCH_REGION
+    INC_FUEL --> FETCH_FUEL
+    INC_POWER --> FETCH_POWER
+    BF_REGION --> FETCH_REGION
+    BF_FUEL --> FETCH_FUEL
+    BF_POWER --> FETCH_POWER
+
+    FETCH_REGION --> TOPIC_REGION
+    FETCH_FUEL --> TOPIC_FUEL
+    FETCH_POWER --> TOPIC_POWER
+
+    TOPIC_REGION --> BRONZE
+    TOPIC_FUEL --> BRONZE
+    TOPIC_POWER --> BRONZE
+    TOPIC_REGION -. offsets .-> CKPT
+    TOPIC_FUEL -. offsets .-> CKPT
+    TOPIC_POWER -. offsets .-> CKPT
+
+    BRONZE --> SILVER
+    SILVER --> GOLD_HOURLY
+    SILVER --> GOLD_MONTHLY
+
+    GOLD_HOURLY --> REGION_DAILY
+    GOLD_HOURLY --> GRID_DAG
+    GOLD_HOURLY --> PLAN_DAG
+    GOLD_MONTHLY --> POWER_MONTHLY
+
+    GRID_DAG --> GRID_HOURLY
+    GRID_DAG --> GRID_ALERTS
+    PLAN_DAG --> PLAN_DAILY
+
+    BF_REGION -. queue state .-> OPS
+    BF_FUEL -. queue state .-> OPS
+    BF_POWER -. queue state .-> OPS
+    VERIFY -. dormant path .-> OPS
+
+    APP --> GRID_PAGE
+    APP --> PLAN_PAGE
+    GRID_HOURLY --> GRID_PAGE
+    GRID_ALERTS --> GRID_PAGE
+    PLAN_DAILY --> PLAN_PAGE
+
+    ADMIN --> ADMIN_TOOLS
+    OPS --> ADMIN_TOOLS
+    REGION_DAILY --> ADMIN_TOOLS
+    GRID_HOURLY --> ADMIN_TOOLS
+    PLAN_DAILY --> ADMIN_TOOLS
+    POWER_MONTHLY --> ADMIN_TOOLS
+
+    class EIA_REGION,EIA_FUEL,EIA_POWER source;
+    class INC_REGION,INC_FUEL,INC_POWER,BF_REGION,BF_FUEL,BF_POWER,GRID_DAG,PLAN_DAG,VERIFY orchestration;
+    class FETCH_REGION,FETCH_FUEL,FETCH_POWER,TOPIC_REGION,TOPIC_FUEL,TOPIC_POWER,BRONZE,CKPT,SILVER,GOLD_HOURLY,GOLD_MONTHLY storage;
+    class OPS,REGION_DAILY,GRID_HOURLY,GRID_ALERTS,PLAN_DAILY,POWER_MONTHLY serving;
+    class APP,ADMIN,GRID_PAGE,PLAN_PAGE,ADMIN_TOOLS app;

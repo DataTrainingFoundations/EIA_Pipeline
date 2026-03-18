@@ -1,0 +1,105 @@
+flowchart TB
+    classDef source fill:#f8efe1,stroke:#9c5b00,color:#3d2500,stroke-width:1.5px;
+    classDef orchestration fill:#e8f0ff,stroke:#2458a6,color:#0f2c5c,stroke-width:1.5px;
+    classDef compute fill:#eaf7ea,stroke:#2d7a3f,color:#163d20,stroke-width:1.5px;
+    classDef warehouse fill:#fff4d6,stroke:#9b6b00,color:#4d3400,stroke-width:1.5px;
+    classDef ui fill:#f9e7f0,stroke:#b33c75,color:#5a1738,stroke-width:1.5px;
+    classDef note fill:#f4f4f4,stroke:#777,color:#222,stroke-dasharray: 5 5;
+
+    AF["Airflow orchestration<br/>incrementals, backfills, serving DAGs"]:::orchestration
+    OPS["Postgres ops metadata<br/>backfill queue, coverage, repair state"]:::warehouse
+    VERIFY["Bronze verification / repair path<br/>implemented, not auto-unpaused"]:::note
+
+    subgraph INGEST["Ingestion boundary"]
+        direction LR
+        EIA_R["EIA region API"]:::source --> FETCH_R["fetch_eia<br/>electricity_region_data"]:::compute --> TOPIC_R["Kafka topic<br/>eia_electricity_region_data"]:::compute
+        EIA_F["EIA fuel API"]:::source --> FETCH_F["fetch_eia<br/>electricity_fuel_type_data"]:::compute --> TOPIC_F["Kafka topic<br/>eia_electricity_fuel_type_data"]:::compute
+        EIA_P["EIA power API"]:::source --> FETCH_P["fetch_eia<br/>electricity_power_operational_data"]:::compute --> TOPIC_P["Kafka topic<br/>eia_electricity_power_operational_data"]:::compute
+    end
+
+    subgraph RAW["Bronze layer"]
+        direction LR
+        BRONZE["Bronze raw events<br/>dataset/year/month/day/hour"]:::compute
+        CKPT["Bronze checkpoints<br/>offsets.json per dataset"]:::compute
+    end
+
+    subgraph CLEAN["Silver layer"]
+        direction LR
+        SILVER_R["Silver region_data"]:::compute
+        SILVER_F["Silver fuel_type_data"]:::compute
+        SILVER_P["Silver electric_power_operational_data"]:::compute
+    end
+
+    subgraph CURATED["Gold layer"]
+        direction LR
+        GOLD_RF["Gold region demand + fuel generation facts"]:::compute
+        GOLD_DIM["Gold respondent + fuel_type dimensions"]:::compute
+        GOLD_PM["Gold electric_power_operations_monthly"]:::compute
+    end
+
+    subgraph SERVE["Serving layer"]
+        direction LR
+        REGION_DAILY["platinum.region_demand_daily"]:::warehouse
+        GRID_HOURLY["platinum.grid_operations_hourly"]:::warehouse
+        GRID_ALERTS["platinum.grid_operations_alert_hourly"]:::warehouse
+        PLAN_DAILY["platinum.resource_planning_daily"]:::warehouse
+        POWER_MONTHLY["platinum.electric_power_operations_monthly"]:::warehouse
+    end
+
+    subgraph APPS["Consumers"]
+        direction LR
+        BIZ["Business Streamlit app"]:::ui
+        ADMIN["Admin Streamlit app"]:::ui
+        GRID_PAGE["Grid operations page"]:::ui
+        PLAN_PAGE["Resource planning page"]:::ui
+        ADMIN_VIEW["Comparisons / Airflow / logs"]:::ui
+    end
+
+    AF --> FETCH_R
+    AF --> FETCH_F
+    AF --> FETCH_P
+    AF -. backfill queue .-> OPS
+    AF -. serving merges and validations .-> REGION_DAILY
+    AF -. serving merges and validations .-> GRID_HOURLY
+    AF -. serving merges and validations .-> GRID_ALERTS
+    AF -. serving merges and validations .-> PLAN_DAILY
+    AF -. monthly serving merge .-> POWER_MONTHLY
+    AF -. dormant safety-net .-> VERIFY
+    VERIFY -. writes metadata .-> OPS
+
+    TOPIC_R --> BRONZE
+    TOPIC_F --> BRONZE
+    TOPIC_P --> BRONZE
+    TOPIC_R -. next offsets .-> CKPT
+    TOPIC_F -. next offsets .-> CKPT
+    TOPIC_P -. next offsets .-> CKPT
+
+    BRONZE --> SILVER_R
+    BRONZE --> SILVER_F
+    BRONZE --> SILVER_P
+
+    SILVER_R --> GOLD_RF
+    SILVER_F --> GOLD_RF
+    SILVER_R --> GOLD_DIM
+    SILVER_F --> GOLD_DIM
+    SILVER_P --> GOLD_PM
+
+    GOLD_RF --> REGION_DAILY
+    GOLD_RF --> GRID_HOURLY
+    GOLD_RF --> GRID_ALERTS
+    GOLD_RF --> PLAN_DAILY
+    GOLD_DIM --> PLAN_DAILY
+    GOLD_PM --> POWER_MONTHLY
+
+    BIZ --> GRID_PAGE
+    BIZ --> PLAN_PAGE
+    GRID_HOURLY --> GRID_PAGE
+    GRID_ALERTS --> GRID_PAGE
+    PLAN_DAILY --> PLAN_PAGE
+
+    ADMIN --> ADMIN_VIEW
+    OPS --> ADMIN_VIEW
+    REGION_DAILY --> ADMIN_VIEW
+    GRID_HOURLY --> ADMIN_VIEW
+    PLAN_DAILY --> ADMIN_VIEW
+    POWER_MONTHLY --> ADMIN_VIEW

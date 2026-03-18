@@ -1,0 +1,62 @@
+flowchart LR
+    EIA[EIA v2 API]
+    AF[Airflow orchestration]
+    ING[Registry-driven ingestion CLI]
+    K[(Kafka topics)]
+    BR[Spark Bronze batch job]
+    SIL[Spark Silver cleanup jobs]
+    GOLD1[Gold hourly facts and dimensions]
+    GOLD2[Gold monthly power fact]
+    PGRID[Platinum grid and planning stage jobs]
+    PMON[Platinum monthly power stage job]
+    MINIOB[(MinIO Bronze)]
+    MINIOS[(MinIO Silver)]
+    MINIOG[(MinIO Gold)]
+    OPS[(Postgres ops metadata)]
+    PLAT[(Postgres platinum serving tables)]
+    APP[Streamlit business app]
+    ADMIN[Streamlit admin app]
+    VERIFY[Bronze verification and repair DAGs]
+
+    EIA --> ING
+    AF --> ING
+    ING --> K
+    AF --> BR
+    K --> BR
+    BR --> MINIOB
+    MINIOB --> SIL
+    SIL --> MINIOS
+
+    MINIOS --> GOLD1
+    MINIOS --> GOLD2
+    GOLD1 --> MINIOG
+    GOLD2 --> MINIOG
+
+    AF --> PGRID
+    AF --> PMON
+    MINIOG --> PGRID
+    MINIOG --> PMON
+
+    PGRID --> PLAT
+    PMON --> PLAT
+
+    AF --> OPS
+    PLAT --> APP
+    OPS --> ADMIN
+    MINIOB --> ADMIN
+    MINIOS --> ADMIN
+    MINIOG --> ADMIN
+    PLAT --> ADMIN
+
+    AF -. dormant safety-net path .-> VERIFY
+    VERIFY -. writes coverage and repair state .-> OPS
+
+    subgraph Hourly branch
+        GOLD1
+        PGRID
+    end
+
+    subgraph Monthly branch
+        GOLD2
+        PMON
+    end

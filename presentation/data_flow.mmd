@@ -1,0 +1,39 @@
+flowchart TD
+    W[Airflow source window]
+    R[Dataset registry]
+    F[Ingestion fetch and paginate]
+    E[Deterministic event envelope]
+    T[Kafka topic per dataset]
+    O[Bronze offsets.json checkpoint]
+    B[Bronze parquet partitions<br/>dataset/year/month/day/hour]
+    S[Silver parquet partitions<br/>event_date]
+    G1[Gold hourly facts<br/>region and fuel]
+    G2[Gold dimensions<br/>respondent and fuel type]
+    G3[Gold monthly power fact]
+    ST1[Platinum JDBC stage tables]
+    M[Airflow merge and validation]
+    P[(Postgres platinum tables)]
+    D[Streamlit dashboards]
+    A[Admin inspection flows]
+
+    W --> F
+    R --> F
+    F --> E
+    E --> T
+    O --> B
+    T --> B
+    B --> S
+    S --> G1
+    S --> G2
+    S --> G3
+    G1 --> ST1
+    G2 --> ST1
+    G3 --> ST1
+    ST1 --> M
+    M --> P
+    P --> D
+    B --> A
+    S --> A
+    G1 --> A
+    G3 --> A
+    P --> A

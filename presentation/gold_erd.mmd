@@ -1,0 +1,62 @@
+erDiagram
+    RESPONDENT_DIM {
+        text respondent PK
+        text respondent_name
+        date first_seen_date
+        date last_seen_date
+        int source_dataset_count
+        timestamptz updated_at
+    }
+
+    FUEL_TYPE_DIM {
+        text fueltype PK
+        text fueltype_name
+        text fuel_category
+        double emissions_factor_kg_per_mwh
+        timestamptz updated_at
+    }
+
+    REGION_DEMAND_FORECAST_HOURLY {
+        timestamptz period PK
+        text respondent PK
+        date event_date
+        text respondent_name
+        text value_units
+        double actual_demand_mwh
+        double day_ahead_forecast_mwh
+        double forecast_error_mwh
+        double forecast_error_pct
+        timestamptz loaded_at
+    }
+
+    FUEL_GENERATION_HOURLY {
+        timestamptz period PK
+        text respondent PK
+        text fueltype PK
+        date event_date
+        text respondent_name
+        text fueltype_name
+        text value_units
+        double generation_mwh
+        timestamptz loaded_at
+    }
+
+    ELECTRIC_POWER_OPERATIONS_MONTHLY {
+        timestamptz period PK
+        text location PK
+        text sector_id PK
+        text fueltype_id PK
+        date event_date
+        text location_name
+        text sector_name
+        text fueltype_name
+        double ash_content_pct
+        double consumption_for_eg_thousand_units
+        double generation_mwh
+        double heat_content_btu_per_unit
+        timestamptz loaded_at
+    }
+
+    RESPONDENT_DIM ||--o{ REGION_DEMAND_FORECAST_HOURLY : "respondent dimension"
+    RESPONDENT_DIM ||--o{ FUEL_GENERATION_HOURLY : "respondent dimension"
+    FUEL_TYPE_DIM ||--o{ FUEL_GENERATION_HOURLY : "fuel dimension"

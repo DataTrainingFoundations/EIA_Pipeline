@@ -1,0 +1,30 @@
+flowchart TD
+    A[Airflow schedules run] --> B[Ingestion fetches and publishes]
+    B --> C[Kafka topic]
+    C --> D[Bronze bounded batch]
+    D --> E{Any valid transformed rows?}
+    E -- No --> S1[Skip write and end run]
+    E -- Yes --> F[Deduplicate by event_id]
+    F --> G[Write Bronze parquet]
+    G --> H[Persist next offsets.json]
+    H --> I[Run Silver]
+    I --> J[Run Gold]
+    J --> K[Run Platinum stage job]
+    K --> L{Stage table valid?}
+    L -- No --> X1[Validation failure]
+    L -- Yes --> M[Merge stage into target]
+    M --> N{Post-merge validations pass?}
+    N -- No --> X2[Validation failure]
+    N -- Yes --> O[Successful run]
+
+    P[Backfill queue in ops.backfill_jobs] --> Q[Claim next chunk]
+    Q --> A
+    X1 --> R[Mark backfill failed if applicable]
+    X2 --> R
+    R --> T{Stale or retryable later?}
+    T -- Yes --> U[Recover stale job and retry up to cap]
+    T -- No --> V[Manual investigation]
+
+    W[Dormant Bronze verification/repair path]
+    W -. coverage scan .-> Y[ops.bronze_hourly_coverage]
+    Y -. missing hours can enqueue .-> Z[ops.bronze_repair_jobs]

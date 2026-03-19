@@ -35,6 +35,10 @@ Team-facing onboarding now lives next to the code instead of only in `docs/`.
 
 ## Tests
 
+Install shared test tooling:
+
+`python -m pip install -r requirements-dev.txt`
+
 Run the full suite:
 
 `pytest -q`
@@ -47,9 +51,15 @@ Run the standard script wrappers:
 
 `bash scripts/run_tests.sh spark`
 
+`bash scripts/run_tests.sh coverage`
+
 On Windows:
 
 `powershell -ExecutionPolicy Bypass -File scripts/run_tests.ps1 -Mode fast`
+
+Coverage report:
+
+`powershell -ExecutionPolicy Bypass -File scripts/run_tests.ps1 -Mode coverage`
 
 ## Current DAGs
 

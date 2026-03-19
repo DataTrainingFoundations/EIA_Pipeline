@@ -20,12 +20,14 @@ This folder contains setup, SQL-apply, and test-run commands that make local tea
 
 ## Follow This Function Next
 - Use `run_tests.sh` or `run_tests.ps1` for local validation.
+- Install shared test tooling with `python -m pip install -r requirements-dev.txt` before using coverage mode.
 - Follow the called `pytest` target or setup command from there into the repo area you are changing.
 
 ## Relevant Tests
 - `scripts/run_tests.sh fast`
 - `scripts/run_tests.sh app-airflow`
 - `scripts/run_tests.sh spark`
+- `scripts/run_tests.sh coverage`
 
 ## Common Mistakes
 - Hiding one-off debugging commands here without documentation.

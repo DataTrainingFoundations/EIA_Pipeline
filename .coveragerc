@@ -1,0 +1,25 @@
+[run]
+branch = True
+source =
+    ingestion/src
+    airflow/dags
+    app
+    admin_app
+    spark/common
+    spark/jobs
+omit =
+    */tests/*
+    */__pycache__/*
+    */__init__.py
+
+[report]
+skip_covered = False
+show_missing = True
+precision = 1
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+    raise NotImplementedError
+
+[html]
+directory = htmlcov

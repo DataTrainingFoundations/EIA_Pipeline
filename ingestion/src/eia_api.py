@@ -56,10 +56,18 @@ def resolve_api_window_bounds(
         raise ValueError(f"Invalid source window: end must be greater than start (start={start}, end={end})")
 
     if frequency == "hourly":
+        last_included_hour = end_dt - timedelta(hours=1)
         if hourly_window_mode == "current_day_end":
-            api_end = start_dt.replace(hour=23, minute=0, second=0, microsecond=0)
+            # Region demand/forecast data often materializes for the full local
+            # operating day even when the pipeline asks for a single hour. Keep
+            # that behavior for same-day windows, but do not collapse multi-day
+            # backfill windows down to the start date.
+            if start_dt.date() == last_included_hour.date():
+                api_end = start_dt.replace(hour=23, minute=0, second=0, microsecond=0)
+            else:
+                api_end = last_included_hour
         else:
-            api_end = end_dt - timedelta(hours=1)
+            api_end = last_included_hour
         return start_dt.strftime("%Y-%m-%dT%H"), api_end.strftime("%Y-%m-%dT%H")
     if frequency == "monthly":
         api_start = start_dt - timedelta(days=1)

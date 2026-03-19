@@ -2,9 +2,11 @@ docs/
 .env
 .env.*
 !.env.example
+venv311/
+__pycache__/
+*.pyc
 
 # Python
-__pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
@@ -28,4 +30,3 @@ Thumbs.db
 *.log
 logs/
 airflow/logs/
-

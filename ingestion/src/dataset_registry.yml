@@ -44,6 +44,7 @@ datasets:
     data_columns:
       - ash-content
       - consumption-for-eg
+      - cost
       - generation
       - heat-content
 

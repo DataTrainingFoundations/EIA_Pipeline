@@ -1,4 +1,5 @@
 import streamlit as st
+
 from data_access import (
     get_backfill_status,
     get_connection,
@@ -8,96 +9,219 @@ from data_access import (
     table_has_rows,
 )
 
+
+def _room_card(title: str, summary: str, bullets: list[str], tone: str) -> str:
+    bullet_html = "".join(f"<li>{item}</li>" for item in bullets)
+    return f"""
+    <div class="landing-card {tone}">
+        <div class="landing-card-title">{title}</div>
+        <div class="landing-card-copy">{summary}</div>
+        <ul>{bullet_html}</ul>
+    </div>
+    """
+
+
 st.set_page_config(page_title="EIA Analytics", layout="wide")
-st.title("EIA Decision Support")
-st.caption(
-    "Action-focused business dashboards for near-term operations and resource planning decisions."
+
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background:
+            radial-gradient(circle at top right, rgba(24,95,165,0.10), transparent 24%),
+            linear-gradient(180deg, #f8fafc 0%, #edf4fb 100%);
+    }
+    .landing-hero {
+        background: linear-gradient(135deg, #123b61 0%, #1d5f96 55%, #4d88b8 100%);
+        color: #f8fafc;
+        border-radius: 22px;
+        padding: 1.45rem 1.55rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 16px 34px rgba(18,59,97,0.18);
+    }
+    .landing-kicker {
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        font-size: 0.74rem;
+        opacity: 0.8;
+        margin-bottom: 0.5rem;
+    }
+    .landing-title {
+        font-size: 2.05rem;
+        font-weight: 700;
+        line-height: 1.12;
+        margin-bottom: 0.5rem;
+    }
+    .landing-copy {
+        max-width: 60rem;
+        font-size: 1rem;
+        opacity: 0.94;
+    }
+    .landing-card {
+        background: rgba(255,255,255,0.95);
+        border: 1px solid #d8e3ef;
+        border-radius: 18px;
+        padding: 1.05rem 1.1rem;
+        min-height: 242px;
+        box-shadow: 0 10px 22px rgba(16,38,58,0.07);
+    }
+    .landing-grid { border-top: 4px solid #1d9e75; }
+    .landing-strategy { border-top: 4px solid #c65d2e; }
+    .landing-planning { border-top: 4px solid #ef9f27; }
+    .landing-card-title {
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: #10263a;
+        margin-bottom: 0.4rem;
+    }
+    .landing-card-copy {
+        color: #4d5f73;
+        line-height: 1.45;
+        margin-bottom: 0.8rem;
+    }
+    .landing-card ul {
+        margin: 0;
+        padding-left: 1.15rem;
+        color: #4d5f73;
+    }
+    .landing-card li { margin-bottom: 0.4rem; }
+    .landing-status {
+        border: 1px solid #d8e3ef;
+        border-radius: 16px;
+        padding: 0.95rem 1rem;
+        background: rgba(255,255,255,0.92);
+        color: #10263a;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
-# Database connection
 try:
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("select now()")
             server_time = cur.fetchone()[0]
-    st.success(f"Platform connected. PostgreSQL server time: {server_time}")
 except Exception as exc:  # pragma: no cover
     st.error(f"Database connection failed: {exc}")
     st.stop()
 
-tabs = st.tabs(
-    ["Grid Operations Manager", "Utility Strategy Director", "Resource Planning Lead"]
+st.markdown(
+    """
+    <div class="landing-hero">
+        <div class="landing-kicker">Decision support</div>
+        <div class="landing-title">Choose the decision room that matches the horizon.</div>
+        <div class="landing-copy">
+            Grid Operations Manager is for immediate operating pressure. Utility Strategy Director
+            is for board-facing transition posture. Resource Planning Lead is for structural
+            planning follow-through.
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
-# GRID OPERATIONS MANAGER TAB
-with tabs[0]:
-    st.subheader("Grid Operations Manager")
-    st.markdown("""
-        - Identify where immediate load risk or coverage stress needs attention
-        - Triage forecast miss, ramp stress, and active alerts
-        - Use trends as evidence after the current watchlist is clear
-        """)
+status_left, status_right = st.columns([1.2, 1])
+status_left.markdown(
+    f"""
+    <div class="landing-status">
+        <strong>Platform connected.</strong><br>
+        PostgreSQL server time: {server_time}
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+status_right.markdown(
+    """
+    <div class="landing-status">
+        <strong>Navigation note.</strong><br>
+        Open a page from the links below or use the Streamlit sidebar page list.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.subheader("Decision rooms")
+room1, room2, room3 = st.columns(3)
+
+with room1:
+    st.markdown(
+        _room_card(
+            "Grid Operations Manager",
+            "Short-horizon triage for demand stress, coverage gaps, and active alerts.",
+            [
+                "Identify which respondents need intervention now.",
+                "Validate forecast misses, ramp stress, and alert evidence.",
+                "Use trends after the current watchlist is clear.",
+            ],
+            "landing-grid",
+        ),
+        unsafe_allow_html=True,
+    )
     if hasattr(st, "page_link"):
-        st.page_link(
-            "pages/grid_operations_manager.py", label="Open Grid Operations Manager"
-        )
-    else:
-        st.caption("Use the sidebar to open Grid Operations Manager.")
+        st.page_link("pages/grid_operations_manager.py", label="Open Grid Operations Manager")
 
-    col1, col2, col3 = st.columns(3)
-    if table_has_rows():
-        coverage = get_summary_coverage()
-        col1.metric("Core Daily Rows", f"{int(coverage['row_count']):,}")
-        freshness_col1 = col1
-        freshness_col1.markdown(
-            f"**Core Daily Coverage**  \n{coverage['min_date']}  \nto  \n{coverage['max_date']}"
-        )
-    if table_has_rows("platinum.grid_operations_hourly"):
-        ops_coverage = get_grid_operations_coverage()
-        col2.metric("Ops Hourly Rows", f"{int(ops_coverage['row_count']):,}")
-        freshness_col2 = col2
-        freshness_col2.markdown(
-            f"**Ops Hourly Coverage**  \n{ops_coverage['min_period']}  \nto  \n{ops_coverage['max_period']}"
-        )
-
-# UTILITY STRATEGY DIRECTOR TAB
-with tabs[1]:
-    st.subheader("Utility Strategy Director")
-    st.markdown("""
-        - Evaluate portfolio-level risk and opportunities
-        - Review fuel diversity, capacity, and grid resilience metrics
-        - Monitor long-term trends to guide strategic planning
-        """)
+with room2:
+    st.markdown(
+        _room_card(
+            "Utility Strategy Director",
+            "Board-facing transition view for structural portfolio exposure and resilience.",
+            [
+                "Spot utilities with the biggest transition gaps.",
+                "Compare carbon exposure, clean coverage, and gas reliance.",
+                "Use the board packet to explain one utility in detail.",
+            ],
+            "landing-strategy",
+        ),
+        unsafe_allow_html=True,
+    )
     if hasattr(st, "page_link"):
-        st.page_link(
-            "pages/utility_strategy_director.py", label="Open Utility Strategy Director"
-        )
-    else:
-        st.caption("Use the sidebar to open Utility Strategy Director.")
+        st.page_link("pages/utility_strategy_director.py", label="Open Utility Strategy Director")
 
-
-# RESOURCE PLANNING LEAD TAB
-with tabs[2]:
-    st.subheader("Resource Planning Lead")
-    st.markdown("""
-        - Identify where structural planning attention is needed
-        - Compare carbon intensity, renewable share, fuel diversity, and gas dependence
-        - Use recent trends to explain why a region is on the watchlist
-        """)
+with room3:
+    st.markdown(
+        _room_card(
+            "Resource Planning Lead",
+            "Structural planning watchlist for medium-horizon action and follow-through.",
+            [
+                "Rank which respondents need planning attention first.",
+                "Explain the primary driver behind each priority label.",
+                "Use supporting evidence only after the watchlist is clear.",
+            ],
+            "landing-planning",
+        ),
+        unsafe_allow_html=True,
+    )
     if hasattr(st, "page_link"):
-        st.page_link(
-            "pages/resource_planning_lead.py", label="Open Resource Planning Lead"
-        )
-    else:
-        st.caption("Use the sidebar to open Resource Planning Lead.")
+        st.page_link("pages/resource_planning_lead.py", label="Open Resource Planning Lead")
 
-    if table_has_rows("platinum.resource_planning_daily"):
-        planning_coverage = get_planning_coverage()
-        col = st.columns(1)[0]
-        col.metric("Planning Daily Rows", f"{int(planning_coverage['row_count']):,}")
-        col.markdown(
-            f"**Planning Daily Coverage**  \n{planning_coverage['min_date']}  \nto  \n{planning_coverage['max_date']}"
-        )
+st.divider()
+
+st.subheader("Coverage snapshot")
+coverage_col1, coverage_col2, coverage_col3 = st.columns(3)
+
+if table_has_rows():
+    coverage = get_summary_coverage()
+    coverage_col1.metric("Core daily rows", f"{int(coverage['row_count']):,}")
+    coverage_col1.caption(f"{coverage['min_date']} to {coverage['max_date']}")
+else:
+    coverage_col1.info("Core daily coverage is unavailable.")
+
+if table_has_rows("platinum.grid_operations_hourly"):
+    ops_coverage = get_grid_operations_coverage()
+    coverage_col2.metric("Ops hourly rows", f"{int(ops_coverage['row_count']):,}")
+    coverage_col2.caption(f"{ops_coverage['min_period']} to {ops_coverage['max_period']}")
+else:
+    coverage_col2.info("Grid operations coverage is unavailable.")
+
+if table_has_rows("platinum.resource_planning_daily"):
+    planning_coverage = get_planning_coverage()
+    coverage_col3.metric("Planning daily rows", f"{int(planning_coverage['row_count']):,}")
+    coverage_col3.caption(
+        f"{planning_coverage['min_date']} to {planning_coverage['max_date']}"
+    )
+else:
+    coverage_col3.info("Planning coverage is unavailable.")
 
 st.subheader("Operational Status")
 with st.expander("Backfill Status", expanded=False):
@@ -105,4 +229,4 @@ with st.expander("Backfill Status", expanded=False):
     if status_df.empty:
         st.info("No backfill jobs have been queued yet.")
     else:
-        st.dataframe(status_df, use_container_width=True)
+        st.dataframe(status_df, use_container_width=True, hide_index=True)

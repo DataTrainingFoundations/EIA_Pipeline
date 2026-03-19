@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("fast", "app-airflow", "spark", "all")]
+    [ValidateSet("fast", "app-airflow", "spark", "all", "coverage")]
     [string]$Mode = "all"
 )
 
@@ -15,5 +15,17 @@ switch ($Mode) {
     }
     "all" {
         pytest -q
+    }
+    "coverage" {
+        pytest `
+            --cov=ingestion/src `
+            --cov=airflow/dags `
+            --cov=app `
+            --cov=admin_app `
+            --cov=spark/common `
+            --cov=spark/jobs `
+            --cov-config=.coveragerc `
+            --cov-report=term-missing `
+            --cov-report=html
     }
 }

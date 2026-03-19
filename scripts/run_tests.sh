@@ -16,9 +16,21 @@ case "$MODE" in
   all)
     pytest -q
     ;;
+  coverage)
+    pytest \
+      --cov=ingestion/src \
+      --cov=airflow/dags \
+      --cov=app \
+      --cov=admin_app \
+      --cov=spark/common \
+      --cov=spark/jobs \
+      --cov-config=.coveragerc \
+      --cov-report=term-missing \
+      --cov-report=html
+    ;;
   *)
     echo "Unknown mode: $MODE" >&2
-    echo "Use one of: fast, app-airflow, spark, all" >&2
+    echo "Use one of: fast, app-airflow, spark, all, coverage" >&2
     exit 1
     ;;
 esac

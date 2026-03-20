@@ -22,11 +22,16 @@ def test_build_hourly_coverage_df_marks_missing_and_partial(spark_session) -> No
         datetime(2026, 1, 1, 4, 0, tzinfo=timezone.utc),
     )
     rows = {
-        row["hour_start_utc"].replace(tzinfo=timezone.utc): (row["observed_row_count"], row["status"], row["expected_row_count"])
-        for row in coverage_df.collect()
+        row["hour_label"]: (row["observed_row_count"], row["status"], row["expected_row_count"])
+        for row in coverage_df.selectExpr(
+            "date_format(hour_start_utc, 'yyyy-MM-dd HH') as hour_label",
+            "observed_row_count",
+            "status",
+            "expected_row_count",
+        ).collect()
     }
 
-    assert rows[datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)] == (2, "verified", 2)
-    assert rows[datetime(2026, 1, 1, 1, 0, tzinfo=timezone.utc)] == (1, "partial", 2)
-    assert rows[datetime(2026, 1, 1, 2, 0, tzinfo=timezone.utc)] == (2, "verified", 2)
-    assert rows[datetime(2026, 1, 1, 3, 0, tzinfo=timezone.utc)] == (0, "missing", 2)
+    assert rows["2026-01-01 00"] == (2, "verified", 2)
+    assert rows["2026-01-01 01"] == (1, "partial", 2)
+    assert rows["2026-01-01 02"] == (2, "verified", 2)
+    assert rows["2026-01-01 03"] == (0, "missing", 2)

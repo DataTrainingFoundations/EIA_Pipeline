@@ -4,6 +4,8 @@ from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
+from pyspark.sql.types import DoubleType, LongType, StructField, StructType
+from pyspark.sql.readwriter import DataFrameReader
 
 from common import io as spark_io
 from common.quality import (
@@ -87,7 +89,10 @@ class FakeBuilder:
 def test_quality_helpers_raise_for_bad_data(spark_session) -> None:
     valid_df = spark_session.createDataFrame([{"id": 1, "value": 10.0, "category": "A"}])
     duplicate_df = spark_session.createDataFrame([{"id": 1, "value": 10.0}, {"id": 1, "value": 11.0}])
-    null_df = spark_session.createDataFrame([{"id": 1, "value": None}])
+    null_df = spark_session.createDataFrame(
+        [(1, None)],
+        StructType([StructField("id", LongType(), False), StructField("value", DoubleType(), True)]),
+    )
     negative_df = spark_session.createDataFrame([{"id": 1, "value": -1.0}])
 
     assert_non_empty(valid_df, "valid_df")
@@ -147,33 +152,45 @@ def test_read_helpers_retry_transient_missing_file_errors(monkeypatch) -> None: 
     assert fake_spark.read.calls == 4
 
 
-def test_read_partitioned_parquet_preserves_partition_columns(spark_session, tmp_path) -> None:
-    dataset_path = tmp_path / "partitioned_input"
+def test_read_partitioned_parquet_preserves_partition_columns(monkeypatch, spark_session) -> None:  # noqa: ANN001
+    dataset_path = "file:///partitioned_input"
     expected_date = datetime(2026, 3, 11).date()
     source_df = spark_session.createDataFrame(
-        [
-            {
-                "period": "2026-03-11T18:00:00Z",
-                "respondent": "PJM",
-                "event_date": expected_date,
-            }
-        ]
-    ).selectExpr("to_timestamp(period) as period", "respondent", "event_date")
+        [{"respondent": "PJM", "event_date": expected_date}]
+    )
+    option_calls: list[tuple[str, str]] = []
 
-    source_df.write.mode("overwrite").partitionBy("event_date").parquet(str(dataset_path))
+    original_option = DataFrameReader.option
+    original_parquet = DataFrameReader.parquet
 
-    loaded_df = spark_io.read_partitioned_parquet(spark_session, str(dataset_path))
-    row = loaded_df.select("respondent", "event_date").collect()[0]
+    def fake_option(self, key: str, value: str):  # noqa: ANN001, ANN202
+        option_calls.append((key, value))
+        return original_option(self, key, value)
+
+    def fake_parquet(self, *paths: str):  # noqa: ANN001, ANN202
+        assert paths == (spark_io.partitioned_parquet_glob(dataset_path),)
+        return source_df
+
+    monkeypatch.setattr(DataFrameReader, "option", fake_option)
+    monkeypatch.setattr(DataFrameReader, "parquet", fake_parquet)
+
+    loaded_df = spark_io.read_partitioned_parquet(spark_session, dataset_path)
+    row = loaded_df.collect()[0]
 
     assert row["respondent"] == "PJM"
     assert row["event_date"] == expected_date
+    assert ("basePath", dataset_path) in option_calls
 
 
-def test_read_parquet_if_exists_returns_none_for_empty_existing_directory(spark_session, tmp_path) -> None:
-    empty_dir = tmp_path / "empty_parquet_dir"
-    empty_dir.mkdir()
+def test_read_parquet_if_exists_returns_none_for_empty_existing_directory(monkeypatch, spark_session) -> None:  # noqa: ANN001
+    monkeypatch.setattr(spark_io, "path_exists", lambda *_args, **_kwargs: True)
 
-    assert spark_io.read_parquet_if_exists(spark_session, str(empty_dir)) is None
+    def fake_parquet(self, path: str):  # noqa: ANN001, ANN202
+        raise RuntimeError(f"UNABLE_TO_INFER_SCHEMA for {path}")
+
+    monkeypatch.setattr(DataFrameReader, "parquet", fake_parquet)
+
+    assert spark_io.read_parquet_if_exists(spark_session, "file:///empty_parquet_dir") is None
 
 
 def test_build_spark_session_configures_expected_defaults(monkeypatch) -> None:  # noqa: ANN001

@@ -39,11 +39,23 @@ Install shared test tooling:
 
 `python -m pip install -r requirements-dev.txt`
 
+Run the main local code-quality gate:
+
+`bash scripts/run_tests.sh quality`
+
+Run the main local test-report gate:
+
+`bash scripts/run_tests.sh coverage`
+
 Run the full suite:
 
 `pytest -q`
 
 Run the standard script wrappers:
+
+`bash scripts/run_tests.sh lint`
+
+`bash scripts/run_tests.sh format-check`
 
 `bash scripts/run_tests.sh fast`
 
@@ -55,11 +67,25 @@ Run the standard script wrappers:
 
 On Windows:
 
+`powershell -ExecutionPolicy Bypass -File scripts/run_tests.ps1 -Mode quality`
+
+`powershell -ExecutionPolicy Bypass -File scripts/run_tests.ps1 -Mode lint`
+
+`powershell -ExecutionPolicy Bypass -File scripts/run_tests.ps1 -Mode format-check`
+
 `powershell -ExecutionPolicy Bypass -File scripts/run_tests.ps1 -Mode fast`
 
-Coverage report:
-
 `powershell -ExecutionPolicy Bypass -File scripts/run_tests.ps1 -Mode coverage`
+
+`coverage` is the release-style test gate. It runs the full suite, enforces `0` failures, `0` errors, `0` skips through the generated JUnit report, and fails below `70%` total coverage.
+
+Generated report artifacts:
+
+- `htmlcov/index.html`
+- `test-results/pytest-report.html`
+- `test-results/junit.xml`
+
+`quality` is the main "make sure code passes" command for lint, formatting checks, and the full test suite.
 
 ## Current DAGs
 

@@ -20,14 +20,26 @@ This folder contains setup, SQL-apply, and test-run commands that make local tea
 
 ## Follow This Function Next
 - Use `run_tests.sh` or `run_tests.ps1` for local validation.
-- Install shared test tooling with `python -m pip install -r requirements-dev.txt` before using coverage mode.
+- Install shared test tooling with `python -m pip install -r requirements-dev.txt` before using lint, format, or coverage modes.
+- Use `scripts/run_tests.sh quality` as the main local "make sure code passes" command.
+- Use `scripts/run_tests.sh coverage` or `scripts/run_tests.ps1 -Mode coverage` as the release-style test report gate.
 - Follow the called `pytest` target or setup command from there into the repo area you are changing.
 
 ## Relevant Tests
+- `scripts/run_tests.sh lint`
+- `scripts/run_tests.sh format-check`
+- `scripts/run_tests.sh quality`
 - `scripts/run_tests.sh fast`
 - `scripts/run_tests.sh app-airflow`
 - `scripts/run_tests.sh spark`
 - `scripts/run_tests.sh coverage`
+
+Coverage mode guarantees:
+
+- full-suite pytest run
+- total coverage fail-under `70`
+- JUnit validation for `0` failures, `0` errors, and `0` skips
+- HTML outputs at `htmlcov/index.html` and `test-results/pytest-report.html`
 
 ## Common Mistakes
 - Hiding one-off debugging commands here without documentation.

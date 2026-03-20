@@ -10,7 +10,6 @@ from __future__ import annotations
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-
 from data_access import (
     get_planning_coverage,
     list_respondents,
@@ -70,7 +69,9 @@ def _color_priority(value: str) -> str:
     return f"background-color: {color}; color: #ffffff"
 
 
-def _format_value(value: float | int | str | None, suffix: str = "", decimals: int = 1) -> str:
+def _format_value(
+    value: float | int | str | None, suffix: str = "", decimals: int = 1
+) -> str:
     if value is None or pd.isna(value):
         return "n/a"
     if isinstance(value, str):
@@ -85,14 +86,20 @@ def _describe_trend(values: pd.Series, lower_is_better: bool) -> str:
 
     start_value = float(numeric.iloc[0])
     end_value = float(numeric.iloc[-1])
-    tolerance = max(float(numeric.std(ddof=0) or 0.0) * 0.25, abs(start_value) * 0.03, 0.5)
+    tolerance = max(
+        float(numeric.std(ddof=0) or 0.0) * 0.25, abs(start_value) * 0.03, 0.5
+    )
     delta = end_value - start_value
 
     if abs(delta) <= tolerance:
         return "Flat across the selected window."
 
     improving = delta < 0 if lower_is_better else delta > 0
-    return "Improving across the selected window." if improving else "Worsening across the selected window."
+    return (
+        "Improving across the selected window."
+        if improving
+        else "Worsening across the selected window."
+    )
 
 
 def _plot_rank_chart(
@@ -149,7 +156,9 @@ if not table_has_rows("platinum.resource_planning_daily"):
 coverage = get_planning_coverage()
 max_date = pd.to_datetime(coverage["max_date"])
 min_date = pd.to_datetime(coverage["min_date"])
-default_start_date, default_end_date = build_default_date_range(min_date, max_date, lookback_days=30)
+default_start_date, default_end_date = build_default_date_range(
+    min_date, max_date, lookback_days=30
+)
 respondents = list_respondents("platinum.resource_planning_daily")
 
 with st.sidebar:
@@ -172,16 +181,14 @@ with st.sidebar:
 
     st.divider()
     with st.expander("How to read this page"):
-        st.markdown(
-            """
+        st.markdown("""
 - KPI strip - current planning pressure at a glance.
 - Watchlist - ranked list; Critical rows need structural attention now.
 - Where? - latest rankings showing which respondents stand out most.
 - Focus - drill into one respondent's planning trend.
 - Evidence - latest supporting table plus the historical priority mix.
 - Supporting analysis - secondary context and raw export.
-"""
-        )
+""")
 
 if len(selected_range) != 2:
     st.info("Select a start and end date to load data.")
@@ -191,9 +198,15 @@ start_date, end_date = selected_range
 filtered_respondents = selected_respondents or None
 
 with st.spinner("Loading resource planning data..."):
-    planning_df = load_resource_planning_daily(str(start_date), str(end_date), filtered_respondents)
-    latest_snapshot_df = load_latest_planning_snapshot(str(start_date), str(end_date), filtered_respondents)
-    watchlist_raw = load_planning_watchlist(str(start_date), str(end_date), filtered_respondents)
+    planning_df = load_resource_planning_daily(
+        str(start_date), str(end_date), filtered_respondents
+    )
+    latest_snapshot_df = load_latest_planning_snapshot(
+        str(start_date), str(end_date), filtered_respondents
+    )
+    watchlist_raw = load_planning_watchlist(
+        str(start_date), str(end_date), filtered_respondents
+    )
 
 if planning_df.empty or latest_snapshot_df.empty or watchlist_raw.empty:
     st.warning("No planning rows found for the selected filters.")
@@ -201,7 +214,9 @@ if planning_df.empty or latest_snapshot_df.empty or watchlist_raw.empty:
 
 planning_df["date"] = pd.to_datetime(planning_df["date"])
 planning_df = coerce_numeric(planning_df, NUMERIC_COLUMNS)
-planning_df["day_type"] = planning_df["weekend_flag"].map(lambda value: "Weekend" if value else "Weekday")
+planning_df["day_type"] = planning_df["weekend_flag"].map(
+    lambda value: "Weekend" if value else "Weekday"
+)
 
 latest_snapshot_df["date"] = pd.to_datetime(latest_snapshot_df["date"])
 latest_snapshot_df = coerce_numeric(latest_snapshot_df, NUMERIC_COLUMNS)
@@ -213,8 +228,12 @@ watchlist_df = coerce_numeric(watchlist_df, NUMERIC_COLUMNS)
 thresholds = build_planning_thresholds(latest_snapshot_df)
 
 for df in (watchlist_df, latest_snapshot_df):
-    df["planning_priority"] = df.apply(derive_planning_priority, axis=1, thresholds=thresholds)
-    df["primary_driver"] = df.apply(derive_planning_driver, axis=1, thresholds=thresholds)
+    df["planning_priority"] = df.apply(
+        derive_planning_priority, axis=1, thresholds=thresholds
+    )
+    df["primary_driver"] = df.apply(
+        derive_planning_driver, axis=1, thresholds=thresholds
+    )
 
 watchlist_df = rank_priority_labels(watchlist_df, "planning_priority", PRIORITY_ORDER)
 watchlist_df = watchlist_df.sort_values(
@@ -238,7 +257,11 @@ focus_respondent = st.selectbox(
     index=0,
     help="Select a respondent to inspect its planning trends.",
 )
-focus_df = planning_df[planning_df["respondent"] == focus_respondent].copy().sort_values("date")
+focus_df = (
+    planning_df[planning_df["respondent"] == focus_respondent]
+    .copy()
+    .sort_values("date")
+)
 focus_snapshot_df = watchlist_df[watchlist_df["respondent"] == focus_respondent].head(1)
 
 latest_date = latest_snapshot_df["date"].max()
@@ -265,9 +288,13 @@ k5.metric("Lowest renewable share", _format_value(lowest_renewable, suffix="%"))
 st.divider()
 
 st.subheader("Watchlist - what needs structural attention now?")
-st.caption("Ranked Critical -> Elevated -> Stable. Primary driver explains why each row sits on the watchlist.")
+st.caption(
+    "Ranked Critical -> Elevated -> Stable. Primary driver explains why each row sits on the watchlist."
+)
 
-display_watchlist = watchlist_df[list(WATCHLIST_DISPLAY_COLUMNS.keys())].rename(columns=WATCHLIST_DISPLAY_COLUMNS)
+display_watchlist = watchlist_df[list(WATCHLIST_DISPLAY_COLUMNS.keys())].rename(
+    columns=WATCHLIST_DISPLAY_COLUMNS
+)
 st.dataframe(
     display_watchlist.style.applymap(_color_priority, subset=["Priority"]),
     use_container_width=True,
@@ -278,7 +305,9 @@ st.dataframe(
 st.divider()
 
 st.subheader("Where is structural attention needed?")
-st.caption("Latest-snapshot rankings. Use these to decide which respondent should get planning attention first.")
+st.caption(
+    "Latest-snapshot rankings. Use these to decide which respondent should get planning attention first."
+)
 
 rank_col1, rank_col2 = st.columns(2)
 rank_col3, rank_col4 = st.columns(2)
@@ -369,9 +398,16 @@ if focus_snapshot_df.empty:
 else:
     focus_row = focus_snapshot_df.iloc[0]
     focus_metric1.metric("Priority", str(focus_row["planning_priority"]))
-    focus_metric2.metric("Carbon intensity", _format_value(focus_row["carbon_intensity_kg_per_mwh"]))
-    focus_metric3.metric("Renewable share", _format_value(focus_row["renewable_share_pct"], suffix="%"))
-    focus_metric4.metric("Clean coverage ratio", _format_value(focus_row["clean_coverage_ratio"], decimals=2))
+    focus_metric2.metric(
+        "Carbon intensity", _format_value(focus_row["carbon_intensity_kg_per_mwh"])
+    )
+    focus_metric3.metric(
+        "Renewable share", _format_value(focus_row["renewable_share_pct"], suffix="%")
+    )
+    focus_metric4.metric(
+        "Clean coverage ratio",
+        _format_value(focus_row["clean_coverage_ratio"], decimals=2),
+    )
 
 trend_col1, trend_col2 = st.columns(2)
 trend_col3, trend_col4 = st.columns(2)
@@ -390,7 +426,9 @@ else:
         ),
         use_container_width=True,
     )
-    trend_col1.caption(_describe_trend(carbon_df["carbon_intensity_kg_per_mwh"], lower_is_better=True))
+    trend_col1.caption(
+        _describe_trend(carbon_df["carbon_intensity_kg_per_mwh"], lower_is_better=True)
+    )
 
 renewable_df = focus_df.dropna(subset=["renewable_share_pct"])
 if renewable_df.empty:
@@ -406,7 +444,9 @@ else:
         ),
         use_container_width=True,
     )
-    trend_col2.caption(_describe_trend(renewable_df["renewable_share_pct"], lower_is_better=False))
+    trend_col2.caption(
+        _describe_trend(renewable_df["renewable_share_pct"], lower_is_better=False)
+    )
 
 gas_df = focus_df.dropna(subset=["peak_hour_gas_share_pct"])
 if gas_df.empty:
@@ -422,7 +462,9 @@ else:
         ),
         use_container_width=True,
     )
-    trend_col3.caption(_describe_trend(gas_df["peak_hour_gas_share_pct"], lower_is_better=True))
+    trend_col3.caption(
+        _describe_trend(gas_df["peak_hour_gas_share_pct"], lower_is_better=True)
+    )
 
 forecast_df = focus_df.dropna(subset=["avg_abs_forecast_error_pct"])
 if forecast_df.empty:
@@ -433,21 +475,30 @@ else:
             forecast_df,
             x="date",
             y="avg_abs_forecast_error_pct",
-            labels={"date": "Date", "avg_abs_forecast_error_pct": "Average absolute forecast error (%)"},
+            labels={
+                "date": "Date",
+                "avg_abs_forecast_error_pct": "Average absolute forecast error (%)",
+            },
             title="Forecast error trend",
         ),
         use_container_width=True,
     )
-    trend_col4.caption(_describe_trend(forecast_df["avg_abs_forecast_error_pct"], lower_is_better=True))
+    trend_col4.caption(
+        _describe_trend(forecast_df["avg_abs_forecast_error_pct"], lower_is_better=True)
+    )
 
 st.divider()
 
 st.subheader("Planning evidence - what supports action?")
-st.caption("Filter the latest planning snapshot by priority and driver, then use the daily mix chart to see whether pressure is persistent.")
+st.caption(
+    "Filter the latest planning snapshot by priority and driver, then use the daily mix chart to see whether pressure is persistent."
+)
 
 evidence_filter1, evidence_filter2 = st.columns(2)
 priority_options = ["All"] + PRIORITY_ORDER
-driver_options = ["All"] + sorted(watchlist_df["primary_driver"].dropna().unique().tolist())
+driver_options = ["All"] + sorted(
+    watchlist_df["primary_driver"].dropna().unique().tolist()
+)
 selected_priority = evidence_filter1.selectbox("Priority filter", priority_options)
 selected_driver = evidence_filter2.selectbox("Primary driver filter", driver_options)
 
@@ -457,7 +508,9 @@ if selected_priority != "All":
 if selected_driver != "All":
     evidence_df = evidence_df[evidence_df["primary_driver"] == selected_driver]
 
-display_evidence = evidence_df[list(WATCHLIST_DISPLAY_COLUMNS.keys())].rename(columns=WATCHLIST_DISPLAY_COLUMNS)
+display_evidence = evidence_df[list(WATCHLIST_DISPLAY_COLUMNS.keys())].rename(
+    columns=WATCHLIST_DISPLAY_COLUMNS
+)
 st.dataframe(
     display_evidence.style.applymap(_color_priority, subset=["Priority"]),
     use_container_width=True,
@@ -489,7 +542,9 @@ else:
 st.divider()
 
 with st.expander("Supporting analysis", expanded=False):
-    st.caption("Use these views as secondary context after the watchlist, rankings, and evidence sections are clear.")
+    st.caption(
+        "Use these views as secondary context after the watchlist, rankings, and evidence sections are clear."
+    )
 
     support_col1, support_col2 = st.columns(2)
 
@@ -508,17 +563,28 @@ with st.expander("Supporting analysis", expanded=False):
                 y="daily_demand_mwh",
                 color="day_type",
                 barmode="group",
-                labels={"daily_demand_mwh": "Average daily demand (MWh)", "respondent": "Respondent"},
+                labels={
+                    "daily_demand_mwh": "Average daily demand (MWh)",
+                    "respondent": "Respondent",
+                },
                 title="Weekend versus weekday demand drift",
             ),
             use_container_width=True,
         )
-        support_col1.caption("Planning demand drift can help explain whether the current watchlist pressure is structural or calendar-driven.")
+        support_col1.caption(
+            "Planning demand drift can help explain whether the current watchlist pressure is structural or calendar-driven."
+        )
 
     map_df = latest_snapshot_df.copy()
-    map_df["lat"] = map_df["respondent"].map(lambda code: RESPONDENT_GEO.get(code, {}).get("lat"))
-    map_df["lon"] = map_df["respondent"].map(lambda code: RESPONDENT_GEO.get(code, {}).get("lon"))
-    map_df["location_label"] = map_df["respondent"].map(lambda code: RESPONDENT_GEO.get(code, {}).get("label", code))
+    map_df["lat"] = map_df["respondent"].map(
+        lambda code: RESPONDENT_GEO.get(code, {}).get("lat")
+    )
+    map_df["lon"] = map_df["respondent"].map(
+        lambda code: RESPONDENT_GEO.get(code, {}).get("lon")
+    )
+    map_df["location_label"] = map_df["respondent"].map(
+        lambda code: RESPONDENT_GEO.get(code, {}).get("label", code)
+    )
     map_df = map_df.dropna(subset=["lat", "lon", "renewable_share_pct"])
     if map_df.empty:
         support_col2.info("No mapped planning rows are available at the latest date.")
@@ -531,13 +597,18 @@ with st.expander("Supporting analysis", expanded=False):
                 color="renewable_share_pct",
                 size="daily_demand_mwh",
                 hover_name="respondent",
-                hover_data={"carbon_intensity_kg_per_mwh": ":.1f", "location_label": True},
+                hover_data={
+                    "carbon_intensity_kg_per_mwh": ":.1f",
+                    "location_label": True,
+                },
                 scope="usa",
                 title="Approximate clean share map",
             ),
             use_container_width=True,
         )
-        support_col2.caption("Approximate respondent coordinates only. Use this map as orientation, not as precise geospatial evidence.")
+        support_col2.caption(
+            "Approximate respondent coordinates only. Use this map as orientation, not as precise geospatial evidence."
+        )
 
     raw_download_df = focus_df[
         [

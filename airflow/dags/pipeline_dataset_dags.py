@@ -6,36 +6,33 @@ verification, and repair DAGs for each dataset in the registry.
 
 from __future__ import annotations
 
-from datetime import datetime
-from datetime import timedelta
+from datetime import datetime, timedelta
 
-from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator, ShortCircuitOperator
 from airflow.utils.trigger_rule import TriggerRule
-
 from pipeline_builders import (
+    bronze_write_pool,
     build_bronze_command,
     build_bronze_verification_command,
-    bronze_write_pool,
-    global_backfill_pool,
     build_curated_gold_command,
-    build_power_curated_gold_command,
     build_fetch_command,
     build_merge_task,
+    build_power_curated_gold_command,
     build_power_operations_monthly_platinum_command,
     build_region_daily_platinum_command,
     build_silver_command,
     build_validate_bounds_task,
     build_validate_distinct_task,
     build_validate_rows_task,
+    global_backfill_pool,
 )
 from pipeline_constants import (
     BACKFILL_SCHEDULE,
     BRONZE_HOURLY_COVERAGE_COLUMNS,
-    POWER_OPERATIONS_MONTHLY_COLUMNS,
     BRONZE_REPAIR_SCHEDULE,
     BRONZE_VERIFICATION_SCHEDULE,
+    POWER_OPERATIONS_MONTHLY_COLUMNS,
     REGION_DAILY_COLUMNS,
 )
 from pipeline_support import (
@@ -52,6 +49,8 @@ from pipeline_support import (
     trigger_repair_dag_if_idle,
 )
 
+from airflow import DAG
+
 DATASET_DEFAULT_ARGS = {"retries": 2, "retry_delay": timedelta(minutes=5)}
 BACKFILL_DEFAULT_ARGS = {"retries": 1, "retry_delay": timedelta(minutes=5)}
 
@@ -60,12 +59,25 @@ def build_incremental_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
     """Build the dataset incremental DAG from ingestion through optional serving."""
 
     dag_id = f"{dataset_id}_incremental"
-    has_silver = dataset_id in {"electricity_region_data", "electricity_fuel_type_data", "electricity_power_operational_data"}
-    has_serving = dataset_id in {"electricity_region_data", "electricity_power_operational_data"} and bool(dataset.get("platinum_table"))
-    has_curated_gold = dataset_id in {"electricity_region_data", "electricity_fuel_type_data", "electricity_power_operational_data"}
+    has_silver = dataset_id in {
+        "electricity_region_data",
+        "electricity_fuel_type_data",
+        "electricity_power_operational_data",
+    }
+    has_serving = dataset_id in {
+        "electricity_region_data",
+        "electricity_power_operational_data",
+    } and bool(dataset.get("platinum_table"))
+    has_curated_gold = dataset_id in {
+        "electricity_region_data",
+        "electricity_fuel_type_data",
+        "electricity_power_operational_data",
+    }
     incremental_schedule = dataset.get("incremental_schedule", "@hourly")
 
-    cli_start_expr = "{{ data_interval_start.in_timezone('UTC').strftime('%Y-%m-%dT%H') }}"
+    cli_start_expr = (
+        "{{ data_interval_start.in_timezone('UTC').strftime('%Y-%m-%dT%H') }}"
+    )
     cli_end_expr = "{{ data_interval_end.in_timezone('UTC').strftime('%Y-%m-%dT%H') }}"
     if dataset.get("frequency", "hourly") != "hourly":
         cli_start_expr = "{{ data_interval_start.in_timezone('UTC').isoformat() }}"
@@ -87,7 +99,9 @@ def build_incremental_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
 
         ingest = BashOperator(
             task_id="ingest_to_kafka",
-            bash_command=build_fetch_command(dataset_id, cli_start_expr, cli_end_expr, max_pages=20),
+            bash_command=build_fetch_command(
+                dataset_id, cli_start_expr, cli_end_expr, max_pages=20
+            ),
         )
         bronze = BashOperator(
             task_id="spark_bronze_batch",
@@ -100,7 +114,9 @@ def build_incremental_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
         if has_silver:
             silver = BashOperator(
                 task_id="spark_silver_batch",
-                bash_command=build_silver_command(dataset, dataset_id, start_expr, end_expr),
+                bash_command=build_silver_command(
+                    dataset, dataset_id, start_expr, end_expr
+                ),
             )
             bronze >> silver
             upstream = silver
@@ -124,7 +140,9 @@ def build_incremental_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
                 stage_table = "platinum.electric_power_operations_monthly_stage_{{ ts_nodash | lower }}"
                 platinum = BashOperator(
                     task_id="spark_platinum_stage",
-                    bash_command=build_power_operations_monthly_platinum_command(dataset, stage_table, start_expr, end_expr),
+                    bash_command=build_power_operations_monthly_platinum_command(
+                        dataset, stage_table, start_expr, end_expr
+                    ),
                 )
                 validate_stage_rows = build_validate_rows_task(
                     "validate_platinum_stage_rows",
@@ -168,11 +186,19 @@ def build_incremental_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
                     allow_empty_result=True,
                 )
             else:
-                stage_table = "platinum.region_demand_daily_stage_{{ ts_nodash | lower }}"
-                platinum_start_expr = region_day_start_expr if dataset_id == "electricity_region_data" else start_expr
+                stage_table = (
+                    "platinum.region_demand_daily_stage_{{ ts_nodash | lower }}"
+                )
+                platinum_start_expr = (
+                    region_day_start_expr
+                    if dataset_id == "electricity_region_data"
+                    else start_expr
+                )
                 platinum = BashOperator(
                     task_id="spark_platinum_stage",
-                    bash_command=build_region_daily_platinum_command(stage_table, platinum_start_expr, end_expr),
+                    bash_command=build_region_daily_platinum_command(
+                        stage_table, platinum_start_expr, end_expr
+                    ),
                 )
                 validate_stage_rows = build_validate_rows_task(
                     "validate_platinum_stage_rows",
@@ -214,7 +240,15 @@ def build_incremental_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
                     description="region demand platinum nonnegative daily demand",
                     allow_empty_result=True,
                 )
-            upstream >> platinum >> validate_stage_rows >> merge >> validate_rows >> validate_distinct_respondents >> validate_positive_demand
+            (
+                upstream
+                >> platinum
+                >> validate_stage_rows
+                >> merge
+                >> validate_rows
+                >> validate_distinct_respondents
+                >> validate_positive_demand
+            )
     return dag
 
 
@@ -222,9 +256,20 @@ def build_backfill_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
     """Build the newest-first historical backfill DAG for one dataset."""
 
     dag_id = f"{dataset_id}_backfill"
-    has_silver = dataset_id in {"electricity_region_data", "electricity_fuel_type_data", "electricity_power_operational_data"}
-    has_serving = dataset_id in {"electricity_region_data", "electricity_power_operational_data"} and bool(dataset.get("platinum_table"))
-    has_curated_gold = dataset_id in {"electricity_region_data", "electricity_fuel_type_data", "electricity_power_operational_data"}
+    has_silver = dataset_id in {
+        "electricity_region_data",
+        "electricity_fuel_type_data",
+        "electricity_power_operational_data",
+    }
+    has_serving = dataset_id in {
+        "electricity_region_data",
+        "electricity_power_operational_data",
+    } and bool(dataset.get("platinum_table"))
+    has_curated_gold = dataset_id in {
+        "electricity_region_data",
+        "electricity_fuel_type_data",
+        "electricity_power_operational_data",
+    }
 
     with DAG(
         dag_id=dag_id,
@@ -237,17 +282,39 @@ def build_backfill_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
         tags=["eia", "pipeline", dataset_id, "backfill"],
     ) as dag:
         claim_key = "claim_backfill_chunk"
-        chunk_start_expr = "{{ ti.xcom_pull(task_ids='claim_backfill_chunk')['chunk_start_utc'] }}"
-        chunk_end_expr = "{{ ti.xcom_pull(task_ids='claim_backfill_chunk')['chunk_end_utc'] }}"
-        chunk_cli_start_expr = "{{ ti.xcom_pull(task_ids='claim_backfill_chunk')['chunk_start_cli'] }}"
-        chunk_cli_end_expr = "{{ ti.xcom_pull(task_ids='claim_backfill_chunk')['chunk_end_cli'] }}"
+        chunk_start_expr = (
+            "{{ ti.xcom_pull(task_ids='claim_backfill_chunk')['chunk_start_utc'] }}"
+        )
+        chunk_end_expr = (
+            "{{ ti.xcom_pull(task_ids='claim_backfill_chunk')['chunk_end_utc'] }}"
+        )
+        chunk_cli_start_expr = (
+            "{{ ti.xcom_pull(task_ids='claim_backfill_chunk')['chunk_start_cli'] }}"
+        )
+        chunk_cli_end_expr = (
+            "{{ ti.xcom_pull(task_ids='claim_backfill_chunk')['chunk_end_cli'] }}"
+        )
 
-        enqueue = PythonOperator(task_id="enqueue_backfill_jobs", python_callable=enqueue_backfill_jobs, op_kwargs={"dataset_id": dataset_id})
-        claim = PythonOperator(task_id=claim_key, python_callable=claim_next_backfill_chunk, op_kwargs={"dataset_id": dataset_id})
-        has_work = ShortCircuitOperator(task_id="has_backfill_chunk", python_callable=has_backfill_chunk, op_args=[claim.output])
+        enqueue = PythonOperator(
+            task_id="enqueue_backfill_jobs",
+            python_callable=enqueue_backfill_jobs,
+            op_kwargs={"dataset_id": dataset_id},
+        )
+        claim = PythonOperator(
+            task_id=claim_key,
+            python_callable=claim_next_backfill_chunk,
+            op_kwargs={"dataset_id": dataset_id},
+        )
+        has_work = ShortCircuitOperator(
+            task_id="has_backfill_chunk",
+            python_callable=has_backfill_chunk,
+            op_args=[claim.output],
+        )
         ingest = BashOperator(
             task_id="ingest_backfill_chunk",
-            bash_command=build_fetch_command(dataset_id, chunk_cli_start_expr, chunk_cli_end_expr, max_pages=50),
+            bash_command=build_fetch_command(
+                dataset_id, chunk_cli_start_expr, chunk_cli_end_expr, max_pages=50
+            ),
         )
         bronze = BashOperator(
             task_id="spark_bronze_backfill_batch",
@@ -257,7 +324,9 @@ def build_backfill_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
         mark_complete = PythonOperator(
             task_id="mark_backfill_complete",
             python_callable=mark_backfill_completed,
-            op_kwargs={"job_id": "{{ ti.xcom_pull(task_ids='claim_backfill_chunk')['id'] }}"},
+            op_kwargs={
+                "job_id": "{{ ti.xcom_pull(task_ids='claim_backfill_chunk')['id'] }}"
+            },
         )
         mark_failed = PythonOperator(
             task_id="mark_backfill_failed",
@@ -278,7 +347,9 @@ def build_backfill_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
         if has_silver:
             silver = BashOperator(
                 task_id="spark_silver_backfill",
-                bash_command=build_silver_command(dataset, dataset_id, chunk_start_expr, chunk_end_expr),
+                bash_command=build_silver_command(
+                    dataset, dataset_id, chunk_start_expr, chunk_end_expr
+                ),
                 pool=backfill_pool,
             )
             bronze >> silver
@@ -289,9 +360,13 @@ def build_backfill_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
             curated_gold = BashOperator(
                 task_id="spark_curated_gold_backfill",
                 bash_command=(
-                    build_power_curated_gold_command(dataset, chunk_start_expr, chunk_end_expr)
+                    build_power_curated_gold_command(
+                        dataset, chunk_start_expr, chunk_end_expr
+                    )
                     if dataset_id == "electricity_power_operational_data"
-                    else build_curated_gold_command(dataset_id, chunk_start_expr, chunk_end_expr)
+                    else build_curated_gold_command(
+                        dataset_id, chunk_start_expr, chunk_end_expr
+                    )
                 ),
                 pool=backfill_pool,
             )
@@ -306,7 +381,9 @@ def build_backfill_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
                 stage_table = "platinum.electric_power_operations_monthly_stage_backfill_{{ ti.xcom_pull(task_ids='claim_backfill_chunk')['id'] }}"
                 platinum = BashOperator(
                     task_id="spark_platinum_backfill_stage",
-                    bash_command=build_power_operations_monthly_platinum_command(dataset, stage_table, chunk_start_expr, chunk_end_expr),
+                    bash_command=build_power_operations_monthly_platinum_command(
+                        dataset, stage_table, chunk_start_expr, chunk_end_expr
+                    ),
                     pool=backfill_pool,
                 )
                 validate_stage_rows = build_validate_rows_task(
@@ -354,7 +431,9 @@ def build_backfill_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
                 stage_table = "platinum.region_demand_daily_stage_backfill_{{ ti.xcom_pull(task_ids='claim_backfill_chunk')['id'] }}"
                 platinum = BashOperator(
                     task_id="spark_platinum_backfill_stage",
-                    bash_command=build_region_daily_platinum_command(stage_table, chunk_start_expr, chunk_end_expr),
+                    bash_command=build_region_daily_platinum_command(
+                        stage_table, chunk_start_expr, chunk_end_expr
+                    ),
                     pool=backfill_pool,
                 )
                 validate_stage_rows = build_validate_rows_task(
@@ -397,8 +476,26 @@ def build_backfill_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
                     description="region demand backfill nonnegative daily demand",
                     allow_empty_result=True,
                 )
-            completion_anchor >> platinum >> validate_stage_rows >> merge >> validate_rows >> validate_distinct_respondents >> validate_positive_demand >> mark_complete
-            downstream_failures.extend([platinum, validate_stage_rows, merge, validate_rows, validate_distinct_respondents, validate_positive_demand])
+            (
+                completion_anchor
+                >> platinum
+                >> validate_stage_rows
+                >> merge
+                >> validate_rows
+                >> validate_distinct_respondents
+                >> validate_positive_demand
+                >> mark_complete
+            )
+            downstream_failures.extend(
+                [
+                    platinum,
+                    validate_stage_rows,
+                    merge,
+                    validate_rows,
+                    validate_distinct_respondents,
+                    validate_positive_demand,
+                ]
+            )
         else:
             completion_anchor >> mark_complete
 
@@ -426,7 +523,9 @@ def build_bronze_verification_dag(dataset_id: str, dataset: dict[str, str]) -> D
         stage_table = f"ops.bronze_hourly_coverage_stage_{stage_suffix}_{{{{ ts_nodash | lower }}}}"
         verify = BashOperator(
             task_id="build_bronze_hourly_coverage_stage",
-            bash_command=build_bronze_verification_command(dataset_id, dataset, stage_table),
+            bash_command=build_bronze_verification_command(
+                dataset_id, dataset, stage_table
+            ),
         )
         validate_stage_rows = build_validate_rows_task(
             "validate_bronze_hourly_coverage_stage_rows",
@@ -471,7 +570,11 @@ def build_bronze_verification_dag(dataset_id: str, dataset: dict[str, str]) -> D
         enqueue_repairs = PythonOperator(
             task_id="enqueue_bronze_repair_candidates",
             python_callable=enqueue_bronze_repair_jobs,
-            op_kwargs={"dataset_id": dataset_id, "statuses": ("missing",), "max_pending_override": 0},
+            op_kwargs={
+                "dataset_id": dataset_id,
+                "statuses": ("missing",),
+                "max_pending_override": 0,
+            },
         )
         trigger_repairs = PythonOperator(
             task_id="trigger_bronze_repair_if_idle",
@@ -479,7 +582,16 @@ def build_bronze_verification_dag(dataset_id: str, dataset: dict[str, str]) -> D
             op_kwargs={"dataset_id": dataset_id},
         )
 
-        verify >> validate_stage_rows >> merge >> validate_rows >> validate_distinct_hours >> validate_non_negative_counts >> enqueue_repairs >> trigger_repairs
+        (
+            verify
+            >> validate_stage_rows
+            >> merge
+            >> validate_rows
+            >> validate_distinct_hours
+            >> validate_non_negative_counts
+            >> enqueue_repairs
+            >> trigger_repairs
+        )
 
     return dag
 
@@ -488,8 +600,13 @@ def build_bronze_repair_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
     """Build the chained Bronze repair DAG for one dataset."""
 
     dag_id = f"{dataset_id}_bronze_hourly_repair"
-    has_serving = dataset_id == "electricity_region_data" and bool(dataset.get("platinum_table"))
-    has_curated_gold = dataset_id in {"electricity_region_data", "electricity_fuel_type_data"}
+    has_serving = dataset_id == "electricity_region_data" and bool(
+        dataset.get("platinum_table")
+    )
+    has_curated_gold = dataset_id in {
+        "electricity_region_data",
+        "electricity_fuel_type_data",
+    }
 
     with DAG(
         dag_id=dag_id,
@@ -502,17 +619,39 @@ def build_bronze_repair_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
         tags=["eia", "bronze", "repair", dataset_id],
     ) as dag:
         claim_key = "claim_bronze_repair_hour"
-        chunk_start_expr = "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['chunk_start_utc'] }}"
-        chunk_end_expr = "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['chunk_end_utc'] }}"
-        chunk_cli_start_expr = "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['chunk_start_cli'] }}"
-        chunk_cli_end_expr = "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['chunk_end_cli'] }}"
+        chunk_start_expr = (
+            "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['chunk_start_utc'] }}"
+        )
+        chunk_end_expr = (
+            "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['chunk_end_utc'] }}"
+        )
+        chunk_cli_start_expr = (
+            "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['chunk_start_cli'] }}"
+        )
+        chunk_cli_end_expr = (
+            "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['chunk_end_cli'] }}"
+        )
 
-        enqueue = PythonOperator(task_id="enqueue_bronze_repair_jobs", python_callable=enqueue_bronze_repair_jobs, op_kwargs={"dataset_id": dataset_id})
-        claim = PythonOperator(task_id=claim_key, python_callable=claim_next_bronze_repair_hour, op_kwargs={"dataset_id": dataset_id})
-        has_work = ShortCircuitOperator(task_id="has_bronze_repair_hour", python_callable=has_repair_chunk, op_args=[claim.output])
+        enqueue = PythonOperator(
+            task_id="enqueue_bronze_repair_jobs",
+            python_callable=enqueue_bronze_repair_jobs,
+            op_kwargs={"dataset_id": dataset_id},
+        )
+        claim = PythonOperator(
+            task_id=claim_key,
+            python_callable=claim_next_bronze_repair_hour,
+            op_kwargs={"dataset_id": dataset_id},
+        )
+        has_work = ShortCircuitOperator(
+            task_id="has_bronze_repair_hour",
+            python_callable=has_repair_chunk,
+            op_args=[claim.output],
+        )
         ingest = BashOperator(
             task_id="ingest_bronze_repair_hour",
-            bash_command=build_fetch_command(dataset_id, chunk_cli_start_expr, chunk_cli_end_expr, max_pages=20),
+            bash_command=build_fetch_command(
+                dataset_id, chunk_cli_start_expr, chunk_cli_end_expr, max_pages=20
+            ),
         )
         bronze = BashOperator(
             task_id="spark_bronze_repair_batch",
@@ -521,12 +660,16 @@ def build_bronze_repair_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
         )
         silver = BashOperator(
             task_id="spark_silver_repair",
-            bash_command=build_silver_command(dataset, dataset_id, chunk_start_expr, chunk_end_expr),
+            bash_command=build_silver_command(
+                dataset, dataset_id, chunk_start_expr, chunk_end_expr
+            ),
         )
         mark_complete = PythonOperator(
             task_id="mark_bronze_repair_complete",
             python_callable=mark_bronze_repair_completed,
-            op_kwargs={"job_id": "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['id'] }}"},
+            op_kwargs={
+                "job_id": "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['id'] }}"
+            },
         )
         mark_failed = PythonOperator(
             task_id="mark_bronze_repair_failed",
@@ -555,7 +698,9 @@ def build_bronze_repair_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
         if has_curated_gold:
             curated_gold = BashOperator(
                 task_id="spark_curated_gold_repair",
-                bash_command=build_curated_gold_command(dataset_id, chunk_start_expr, chunk_end_expr),
+                bash_command=build_curated_gold_command(
+                    dataset_id, chunk_start_expr, chunk_end_expr
+                ),
             )
             silver >> curated_gold
             completion_anchor = curated_gold
@@ -565,7 +710,9 @@ def build_bronze_repair_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
             stage_table = "platinum.region_demand_daily_stage_repair_{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['id'] }}"
             platinum = BashOperator(
                 task_id="spark_platinum_repair_stage",
-                bash_command=build_region_daily_platinum_command(stage_table, chunk_start_expr, chunk_end_expr),
+                bash_command=build_region_daily_platinum_command(
+                    stage_table, chunk_start_expr, chunk_end_expr
+                ),
             )
             validate_stage_rows = build_validate_rows_task(
                 "validate_platinum_repair_stage_rows",
@@ -609,8 +756,27 @@ def build_bronze_repair_dag(dataset_id: str, dataset: dict[str, str]) -> DAG:
                 description="region demand repair nonnegative daily demand",
                 allow_empty_result=True,
             )
-            completion_anchor >> platinum >> validate_stage_rows >> merge >> validate_rows >> validate_distinct_respondents >> validate_positive_demand >> mark_complete >> trigger_next_after_complete
-            downstream_failures.extend([platinum, validate_stage_rows, merge, validate_rows, validate_distinct_respondents, validate_positive_demand])
+            (
+                completion_anchor
+                >> platinum
+                >> validate_stage_rows
+                >> merge
+                >> validate_rows
+                >> validate_distinct_respondents
+                >> validate_positive_demand
+                >> mark_complete
+                >> trigger_next_after_complete
+            )
+            downstream_failures.extend(
+                [
+                    platinum,
+                    validate_stage_rows,
+                    merge,
+                    validate_rows,
+                    validate_distinct_respondents,
+                    validate_positive_demand,
+                ]
+            )
         else:
             completion_anchor >> mark_complete >> trigger_next_after_complete
 

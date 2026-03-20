@@ -59,7 +59,9 @@ def _expected_row_count(hourly_counts_df: DataFrame) -> int | None:
     return int(rows[0]["observed_row_count"])
 
 
-def build_hourly_coverage_df(bronze_df: DataFrame, dataset_id: str, verification_boundary_hour: datetime) -> DataFrame:
+def build_hourly_coverage_df(
+    bronze_df: DataFrame, dataset_id: str, verification_boundary_hour: datetime
+) -> DataFrame:
     """Build the hourly coverage DataFrame Airflow will merge into metadata tables."""
 
     hourly_counts_df = (
@@ -78,7 +80,10 @@ def build_hourly_coverage_df(bronze_df: DataFrame, dataset_id: str, verification
         return hourly_counts_df.limit(0)
 
     _ = newest_observed_hour_utc
-    newest_hour_utc = max(oldest_hour_utc, verification_boundary_hour.replace(tzinfo=None) - timedelta(hours=1))
+    newest_hour_utc = max(
+        oldest_hour_utc,
+        verification_boundary_hour.replace(tzinfo=None) - timedelta(hours=1),
+    )
     expected_row_count = _expected_row_count(hourly_counts_df)
     bounds_df = bronze_df.sparkSession.createDataFrame(
         [(oldest_hour_utc, newest_hour_utc)],
@@ -87,7 +92,9 @@ def build_hourly_coverage_df(bronze_df: DataFrame, dataset_id: str, verification
     hourly_window_df = bounds_df.select(
         "oldest_hour_utc",
         "newest_hour_utc",
-        F.explode(F.expr("sequence(oldest_hour_utc, newest_hour_utc, interval 1 hour)")).alias("hour_start_utc"),
+        F.explode(
+            F.expr("sequence(oldest_hour_utc, newest_hour_utc, interval 1 hour)")
+        ).alias("hour_start_utc"),
     )
 
     coverage_df = (
@@ -97,14 +104,22 @@ def build_hourly_coverage_df(bronze_df: DataFrame, dataset_id: str, verification
         .withColumn("expected_row_count", F.lit(expected_row_count).cast("integer"))
         .withColumn(
             "row_count_delta",
-            F.when(F.col("expected_row_count").isNull(), F.lit(None).cast("integer")).otherwise(F.col("observed_row_count") - F.col("expected_row_count")),
+            F.when(
+                F.col("expected_row_count").isNull(), F.lit(None).cast("integer")
+            ).otherwise(F.col("observed_row_count") - F.col("expected_row_count")),
         )
         .withColumn(
             "status",
             F.when(F.col("observed_row_count") == 0, F.lit("missing"))
             .when(F.col("expected_row_count").isNull(), F.lit("observed"))
-            .when(F.col("observed_row_count") == F.col("expected_row_count"), F.lit("verified"))
-            .when(F.col("observed_row_count") < F.col("expected_row_count"), F.lit("partial"))
+            .when(
+                F.col("observed_row_count") == F.col("expected_row_count"),
+                F.lit("verified"),
+            )
+            .when(
+                F.col("observed_row_count") < F.col("expected_row_count"),
+                F.lit("partial"),
+            )
             .otherwise(F.lit("excess")),
         )
         .withColumn("verification_boundary_hour_utc", F.lit(verification_boundary_hour))
@@ -143,25 +158,57 @@ def main() -> None:
 
     bronze_root = args.bronze_path.rstrip("/")
     if not path_exists(spark, bronze_root):
-        logger.info("Bronze path does not exist; skipping verification dataset_id=%s bronze_path=%s", args.dataset_id, bronze_root)
+        logger.info(
+            "Bronze path does not exist; skipping verification dataset_id=%s bronze_path=%s",
+            args.dataset_id,
+            bronze_root,
+        )
         return
 
-    bronze_df = spark.read.option("recursiveFileLookup", "true").parquet(_bronze_glob(bronze_root))
-    dataset_column = "dataset_partition" if "dataset_partition" in bronze_df.columns else "dataset" if "dataset" in bronze_df.columns else None
+    bronze_df = spark.read.option("recursiveFileLookup", "true").parquet(
+        _bronze_glob(bronze_root)
+    )
+    dataset_column = (
+        "dataset_partition"
+        if "dataset_partition" in bronze_df.columns
+        else "dataset" if "dataset" in bronze_df.columns else None
+    )
     if dataset_column is None:
-        logger.error("Bronze schema is missing dataset discriminator column dataset_id=%s columns=%s", args.dataset_id, bronze_df.columns)
-        raise ValueError(f"Bronze schema is missing dataset discriminator column for {args.dataset_id}")
+        logger.error(
+            "Bronze schema is missing dataset discriminator column dataset_id=%s columns=%s",
+            args.dataset_id,
+            bronze_df.columns,
+        )
+        raise ValueError(
+            f"Bronze schema is missing dataset discriminator column for {args.dataset_id}"
+        )
 
-    logger.info("Using dataset discriminator column dataset_id=%s column=%s", args.dataset_id, dataset_column)
+    logger.info(
+        "Using dataset discriminator column dataset_id=%s column=%s",
+        args.dataset_id,
+        dataset_column,
+    )
     bronze_df = bronze_df.filter(F.col(dataset_column) == args.dataset_id)
     if bronze_df.limit(1).count() == 0:
-        logger.info("Bronze path exists but contains no rows for dataset_id=%s bronze_path=%s", args.dataset_id, bronze_root)
+        logger.info(
+            "Bronze path exists but contains no rows for dataset_id=%s bronze_path=%s",
+            args.dataset_id,
+            bronze_root,
+        )
         return
 
-    verification_boundary_hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    coverage_df = build_hourly_coverage_df(bronze_df, args.dataset_id, verification_boundary_hour)
+    verification_boundary_hour = datetime.now(timezone.utc).replace(
+        minute=0, second=0, microsecond=0
+    )
+    coverage_df = build_hourly_coverage_df(
+        bronze_df, args.dataset_id, verification_boundary_hour
+    )
     if coverage_df.limit(1).count() == 0:
-        logger.info("Coverage dataframe is empty; skipping write dataset_id=%s boundary_hour=%s", args.dataset_id, verification_boundary_hour.isoformat())
+        logger.info(
+            "Coverage dataframe is empty; skipping write dataset_id=%s boundary_hour=%s",
+            args.dataset_id,
+            verification_boundary_hour.isoformat(),
+        )
         return
 
     row_count = coverage_df.count()
@@ -182,7 +229,9 @@ def main() -> None:
         "password": os.getenv("POSTGRES_PASSWORD", "platform"),
         "driver": "org.postgresql.Driver",
     }
-    coverage_df.write.mode("overwrite").jdbc(jdbc_url, args.verification_stage_table, properties=jdbc_props)
+    coverage_df.write.mode("overwrite").jdbc(
+        jdbc_url, args.verification_stage_table, properties=jdbc_props
+    )
     log_job_complete(
         logger,
         "bronze_hourly_coverage_verify",

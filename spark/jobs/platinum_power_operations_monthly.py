@@ -16,7 +16,12 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from common.config import load_spark_app_config
 from common.io import has_partitioned_parquet_input, read_partitioned_parquet
 from common.logging_utils import configure_logging, log_job_complete, log_job_start
-from common.quality import assert_no_nulls, assert_non_negative, assert_unique_keys, assert_value_bounds
+from common.quality import (
+    assert_no_nulls,
+    assert_non_negative,
+    assert_unique_keys,
+    assert_value_bounds,
+)
 from common.spark_session import build_spark_session
 from common.windowing import filter_time_window
 
@@ -26,37 +31,59 @@ logger = logging.getLogger(__name__)
 def parse_args() -> argparse.Namespace:
     """Parse CLI arguments for the monthly power platinum job."""
 
-    parser = argparse.ArgumentParser(description="Build monthly electric power operations serving tables.")
-    parser.add_argument("--gold-input-path", default="s3a://gold/facts/electric_power_operations_monthly")
-    parser.add_argument("--platinum-table", default="platinum.electric_power_operations_monthly")
-    parser.add_argument("--stage-table", default="platinum.electric_power_operations_monthly_stage")
+    parser = argparse.ArgumentParser(
+        description="Build monthly electric power operations serving tables."
+    )
+    parser.add_argument(
+        "--gold-input-path",
+        default="s3a://gold/facts/electric_power_operations_monthly",
+    )
+    parser.add_argument(
+        "--platinum-table", default="platinum.electric_power_operations_monthly"
+    )
+    parser.add_argument(
+        "--stage-table", default="platinum.electric_power_operations_monthly_stage"
+    )
     parser.add_argument("--start")
     parser.add_argument("--end")
     return parser.parse_args()
 
 
-def build_power_operations_monthly(gold_df: DataFrame, start: str | None, end: str | None) -> DataFrame:
+def build_power_operations_monthly(
+    gold_df: DataFrame, start: str | None, end: str | None
+) -> DataFrame:
     """Build the monthly power operations platinum stage table."""
 
     total_generation_window = Window.partitionBy("period", "location")
     platinum_df = (
-        gold_df.withColumn("period_generation_mwh", F.sum("generation_mwh").over(total_generation_window))
+        gold_df.withColumn(
+            "period_generation_mwh",
+            F.sum("generation_mwh").over(total_generation_window),
+        )
         .withColumn(
             "generation_share_pct",
-            F.when(F.col("period_generation_mwh") > 0, (F.col("generation_mwh") / F.col("period_generation_mwh")) * F.lit(100.0)),
+            F.when(
+                F.col("period_generation_mwh") > 0,
+                (F.col("generation_mwh") / F.col("period_generation_mwh"))
+                * F.lit(100.0),
+            ),
         )
         .withColumn(
             "fuel_heat_input_mmbtu",
             F.when(
-                F.col("consumption_for_eg_thousand_units").isNotNull() & F.col("heat_content_btu_per_unit").isNotNull(),
-                F.col("consumption_for_eg_thousand_units") * F.col("heat_content_btu_per_unit") * F.lit(1000.0),
+                F.col("consumption_for_eg_thousand_units").isNotNull()
+                & F.col("heat_content_btu_per_unit").isNotNull(),
+                F.col("consumption_for_eg_thousand_units")
+                * F.col("heat_content_btu_per_unit")
+                * F.lit(1000.0),
             ),
         )
         .withColumn(
             "heat_rate_btu_per_kwh",
             F.when(
                 F.col("generation_mwh") > 0,
-                (F.col("fuel_heat_input_mmbtu") * F.lit(1000.0)) / F.col("generation_mwh"),
+                (F.col("fuel_heat_input_mmbtu") * F.lit(1000.0))
+                / F.col("generation_mwh"),
             ),
         )
         .withColumn("source_window_start", F.to_timestamp(F.lit(start)))
@@ -87,10 +114,23 @@ def build_power_operations_monthly(gold_df: DataFrame, start: str | None, end: s
     )
     assert_no_nulls(
         platinum_df,
-        ["period", "location", "location_name", "sector_id", "sector_name", "fueltype_id", "fueltype_name", "loaded_at"],
+        [
+            "period",
+            "location",
+            "location_name",
+            "sector_id",
+            "sector_name",
+            "fueltype_id",
+            "fueltype_name",
+            "loaded_at",
+        ],
         "platinum.electric_power_operations_monthly_stage",
     )
-    assert_unique_keys(platinum_df, ["period", "location", "sector_id", "fueltype_id"], "platinum.electric_power_operations_monthly_stage")
+    assert_unique_keys(
+        platinum_df,
+        ["period", "location", "sector_id", "fueltype_id"],
+        "platinum.electric_power_operations_monthly_stage",
+    )
     assert_non_negative(
         platinum_df,
         [
@@ -147,7 +187,9 @@ def main() -> None:
     if platinum_df.limit(1).count() == 0:
         return
 
-    platinum_df.write.mode("overwrite").jdbc(jdbc_url, args.stage_table, properties=jdbc_props)
+    platinum_df.write.mode("overwrite").jdbc(
+        jdbc_url, args.stage_table, properties=jdbc_props
+    )
     log_job_complete(
         logger,
         "platinum_power_operations_monthly",

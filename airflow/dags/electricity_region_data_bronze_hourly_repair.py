@@ -2,14 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator, ShortCircuitOperator
 from airflow.utils.trigger_rule import TriggerRule
-
 from pipeline_builders import (
-    build_bronze_command,
     bronze_write_pool,
+    build_bronze_command,
     build_curated_gold_command,
     build_fetch_command,
     build_merge_task,
@@ -30,6 +28,8 @@ from pipeline_support import (
     trigger_repair_dag_if_idle,
 )
 
+from airflow import DAG
+
 DATASET = get_dataset("electricity_region_data")
 
 with DAG(
@@ -42,10 +42,18 @@ with DAG(
     default_args={"retries": 1, "retry_delay": timedelta(minutes=5)},
     tags=["eia", "bronze", "repair", "electricity_region_data"],
 ) as dag:
-    chunk_start_expr = "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['chunk_start_utc'] }}"
-    chunk_end_expr = "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['chunk_end_utc'] }}"
-    chunk_cli_start_expr = "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['chunk_start_cli'] }}"
-    chunk_cli_end_expr = "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['chunk_end_cli'] }}"
+    chunk_start_expr = (
+        "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['chunk_start_utc'] }}"
+    )
+    chunk_end_expr = (
+        "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['chunk_end_utc'] }}"
+    )
+    chunk_cli_start_expr = (
+        "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['chunk_start_cli'] }}"
+    )
+    chunk_cli_end_expr = (
+        "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['chunk_end_cli'] }}"
+    )
     where_clause = "source_window_start = %s and source_window_end = %s"
     window_params = [chunk_start_expr, chunk_end_expr]
     stage_table = "platinum.region_demand_daily_stage_repair_{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['id'] }}"
@@ -67,7 +75,12 @@ with DAG(
     )
     ingest = BashOperator(
         task_id="ingest_bronze_repair_hour",
-        bash_command=build_fetch_command("electricity_region_data", chunk_cli_start_expr, chunk_cli_end_expr, max_pages=20),
+        bash_command=build_fetch_command(
+            "electricity_region_data",
+            chunk_cli_start_expr,
+            chunk_cli_end_expr,
+            max_pages=20,
+        ),
     )
     bronze = BashOperator(
         task_id="spark_bronze_repair_batch",
@@ -76,15 +89,21 @@ with DAG(
     )
     silver = BashOperator(
         task_id="spark_silver_repair",
-        bash_command=build_silver_command(DATASET, "electricity_region_data", chunk_start_expr, chunk_end_expr),
+        bash_command=build_silver_command(
+            DATASET, "electricity_region_data", chunk_start_expr, chunk_end_expr
+        ),
     )
     curated_gold = BashOperator(
         task_id="spark_curated_gold_repair",
-        bash_command=build_curated_gold_command("electricity_region_data", chunk_start_expr, chunk_end_expr),
+        bash_command=build_curated_gold_command(
+            "electricity_region_data", chunk_start_expr, chunk_end_expr
+        ),
     )
     platinum = BashOperator(
         task_id="spark_platinum_repair_stage",
-        bash_command=build_region_daily_platinum_command(stage_table, chunk_start_expr, chunk_end_expr),
+        bash_command=build_region_daily_platinum_command(
+            stage_table, chunk_start_expr, chunk_end_expr
+        ),
     )
     validate_stage_rows = build_validate_rows_task(
         "validate_platinum_repair_stage_rows",
@@ -129,7 +148,9 @@ with DAG(
     mark_complete = PythonOperator(
         task_id="mark_bronze_repair_complete",
         python_callable=mark_bronze_repair_completed,
-        op_kwargs={"job_id": "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['id'] }}"},
+        op_kwargs={
+            "job_id": "{{ ti.xcom_pull(task_ids='claim_bronze_repair_hour')['id'] }}"
+        },
     )
     mark_failed = PythonOperator(
         task_id="mark_bronze_repair_failed",
@@ -143,14 +164,53 @@ with DAG(
     trigger_next_after_complete = PythonOperator(
         task_id="trigger_next_bronze_repair_if_idle",
         python_callable=trigger_repair_dag_if_idle,
-        op_kwargs={"dataset_id": "electricity_region_data", "ignore_run_id": "{{ run_id }}"},
+        op_kwargs={
+            "dataset_id": "electricity_region_data",
+            "ignore_run_id": "{{ run_id }}",
+        },
     )
     trigger_next_after_failure = PythonOperator(
         task_id="trigger_next_bronze_repair_after_failure_if_idle",
         python_callable=trigger_repair_dag_if_idle,
-        op_kwargs={"dataset_id": "electricity_region_data", "ignore_run_id": "{{ run_id }}"},
+        op_kwargs={
+            "dataset_id": "electricity_region_data",
+            "ignore_run_id": "{{ run_id }}",
+        },
     )
 
-    enqueue >> claim >> has_work >> ingest >> bronze >> silver >> curated_gold >> platinum
-    platinum >> validate_stage_rows >> merge >> validate_rows >> validate_distinct_respondents >> validate_positive_demand >> mark_complete >> trigger_next_after_complete
-    [ingest, bronze, silver, curated_gold, platinum, validate_stage_rows, merge, validate_rows, validate_distinct_respondents, validate_positive_demand] >> mark_failed >> trigger_next_after_failure
+    (
+        enqueue
+        >> claim
+        >> has_work
+        >> ingest
+        >> bronze
+        >> silver
+        >> curated_gold
+        >> platinum
+    )
+    (
+        platinum
+        >> validate_stage_rows
+        >> merge
+        >> validate_rows
+        >> validate_distinct_respondents
+        >> validate_positive_demand
+        >> mark_complete
+        >> trigger_next_after_complete
+    )
+    (
+        [
+            ingest,
+            bronze,
+            silver,
+            curated_gold,
+            platinum,
+            validate_stage_rows,
+            merge,
+            validate_rows,
+            validate_distinct_respondents,
+            validate_positive_demand,
+        ]
+        >> mark_failed
+        >> trigger_next_after_failure
+    )

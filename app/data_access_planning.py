@@ -6,12 +6,15 @@ from typing import Any
 
 import pandas as pd
 import streamlit as st
-
 from data_access_shared import RESOURCE_PLANNING_TABLE, _safe_read_sql
 
 
 @st.cache_data(ttl=60)
-def load_resource_planning_daily(start_date: str | None = None, end_date: str | None = None, respondents: list[str] | None = None) -> pd.DataFrame:
+def load_resource_planning_daily(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    respondents: list[str] | None = None,
+) -> pd.DataFrame:
     """Load planning rows for the selected date range and respondents."""
 
     query = f"select * from {RESOURCE_PLANNING_TABLE} where 1 = 1"

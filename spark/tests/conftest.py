@@ -1,7 +1,7 @@
+import gc
 import os
 import sys
 from pathlib import Path
-import gc
 
 import pytest
 
@@ -13,7 +13,6 @@ os.environ["PYSPARK_PYTHON"] = sys.executable
 os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 
 from pyspark.sql import SparkSession
-
 
 SPARK_ROOT = Path(__file__).resolve().parents[1]
 if str(SPARK_ROOT) not in sys.path:

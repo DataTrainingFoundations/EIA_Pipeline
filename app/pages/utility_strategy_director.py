@@ -18,16 +18,14 @@ aur transition readiness par focus karta hai.
 
 from __future__ import annotations
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-
 from data_access import get_backfill_status, table_has_rows
 from data_access_shared import _safe_read_sql
 from ui_utils import build_default_date_range, coerce_numeric, safe_quantile
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -45,9 +43,9 @@ NUMERIC_COLUMNS = [
 PRIORITY_ORDER = ["Critical", "Elevated", "Stable"]
 
 PRIORITY_COLORS = {
-    "Critical": "#F59E0B",   # orange
-    "Elevated": "#2DD4BF",   # aqua
-    "Stable": "#F8FAFC",     # white
+    "Critical": "#F59E0B",  # orange
+    "Elevated": "#2DD4BF",  # aqua
+    "Stable": "#F8FAFC",  # white
 }
 
 COLOR_ORANGE = "#F59E0B"
@@ -65,6 +63,7 @@ COLOR_AMBER = "#FBBF24"
 # ---------------------------------------------------------------------------
 # Data loaders
 # ---------------------------------------------------------------------------
+
 
 @st.cache_data(ttl=300)
 def load_utility_strategy_daily(
@@ -154,6 +153,7 @@ def load_latest_utility_snapshot(
 # Helper functions
 # ---------------------------------------------------------------------------
 
+
 def style_figure(fig):
     fig.update_layout(
         plot_bgcolor=COLOR_BG,
@@ -173,7 +173,9 @@ def _color_strategy_priority(val: str) -> str:
     return f"background-color: {color}; color: white; font-weight: 600;"
 
 
-def _derive_strategy_priority(row: pd.Series, thresholds: dict[str, float | None]) -> str:
+def _derive_strategy_priority(
+    row: pd.Series, thresholds: dict[str, float | None]
+) -> str:
     """Classify a respondent into strategy priority."""
 
     carbon = pd.to_numeric(row.get("carbon_intensity_kg_per_mwh"), errors="coerce")
@@ -183,30 +185,35 @@ def _derive_strategy_priority(row: pd.Series, thresholds: dict[str, float | None
     diversity = pd.to_numeric(row.get("fuel_diversity_index"), errors="coerce")
 
     critical = (
-        thresholds["carbon_p90"] is not None and carbon >= thresholds["carbon_p90"]
-    ) or (
-        thresholds["gas_p90"] is not None
-        and gas >= thresholds["gas_p90"]
-        and thresholds["renewable_p10"] is not None
-        and renewable <= thresholds["renewable_p10"]
-    ) or (
-        thresholds["clean_p10"] is not None
-        and clean <= thresholds["clean_p10"]
-        and thresholds["diversity_p10"] is not None
-        and diversity <= thresholds["diversity_p10"]
+        (thresholds["carbon_p90"] is not None and carbon >= thresholds["carbon_p90"])
+        or (
+            thresholds["gas_p90"] is not None
+            and gas >= thresholds["gas_p90"]
+            and thresholds["renewable_p10"] is not None
+            and renewable <= thresholds["renewable_p10"]
+        )
+        or (
+            thresholds["clean_p10"] is not None
+            and clean <= thresholds["clean_p10"]
+            and thresholds["diversity_p10"] is not None
+            and diversity <= thresholds["diversity_p10"]
+        )
     )
 
     if critical:
         return "Critical"
 
     elevated = (
-        thresholds["carbon_p75"] is not None and carbon >= thresholds["carbon_p75"]
-    ) or (
-        thresholds["renewable_p25"] is not None and renewable <= thresholds["renewable_p25"]
-    ) or (
-        thresholds["clean_p25"] is not None and clean <= thresholds["clean_p25"]
-    ) or (
-        thresholds["diversity_p25"] is not None and diversity <= thresholds["diversity_p25"]
+        (thresholds["carbon_p75"] is not None and carbon >= thresholds["carbon_p75"])
+        or (
+            thresholds["renewable_p25"] is not None
+            and renewable <= thresholds["renewable_p25"]
+        )
+        or (thresholds["clean_p25"] is not None and clean <= thresholds["clean_p25"])
+        or (
+            thresholds["diversity_p25"] is not None
+            and diversity <= thresholds["diversity_p25"]
+        )
     )
 
     if elevated:
@@ -351,15 +358,13 @@ st.caption(
 )
 
 with st.expander("What this page tells you", expanded=True):
-    st.markdown(
-        """
+    st.markdown("""
 - **Which utilities need strategic attention first**
 - **Which utilities are more exposed to future transition risk**
 - **Which utilities are weaker on renewable position or clean coverage**
 - **Which utilities rely more heavily on gas at peak demand**
 - **Whether a selected utility is improving or worsening over time**
-"""
-    )
+""")
 
 # ---------------------------------------------------------------------------
 # Guard checks
@@ -471,10 +476,14 @@ strategy_df = coerce_numeric(strategy_df, NUMERIC_COLUMNS)
 latest_snapshot_df = coerce_numeric(latest_snapshot_df, NUMERIC_COLUMNS)
 
 thresholds = {
-    "carbon_p90": safe_quantile(latest_snapshot_df["carbon_intensity_kg_per_mwh"], 0.90),
+    "carbon_p90": safe_quantile(
+        latest_snapshot_df["carbon_intensity_kg_per_mwh"], 0.90
+    ),
     "gas_p90": safe_quantile(latest_snapshot_df["peak_hour_gas_share_pct"], 0.90),
     "renewable_p10": safe_quantile(latest_snapshot_df["renewable_share_pct"], 0.10),
-    "carbon_p75": safe_quantile(latest_snapshot_df["carbon_intensity_kg_per_mwh"], 0.75),
+    "carbon_p75": safe_quantile(
+        latest_snapshot_df["carbon_intensity_kg_per_mwh"], 0.75
+    ),
     "renewable_p25": safe_quantile(latest_snapshot_df["renewable_share_pct"], 0.25),
     "clean_p25": safe_quantile(latest_snapshot_df["clean_coverage_ratio"], 0.25),
     "clean_p10": safe_quantile(latest_snapshot_df["clean_coverage_ratio"], 0.10),
@@ -488,13 +497,25 @@ latest_snapshot_df["strategy_priority"] = latest_snapshot_df.apply(
     thresholds=thresholds,
 )
 
-latest_snapshot_df["priority_rank"] = latest_snapshot_df["strategy_priority"].map(_priority_sort_rank)
+latest_snapshot_df["priority_rank"] = latest_snapshot_df["strategy_priority"].map(
+    _priority_sort_rank
+)
 
-latest_snapshot_df["score_carbon"] = _normalize_inverse(latest_snapshot_df["carbon_intensity_kg_per_mwh"])
-latest_snapshot_df["score_renewable"] = _normalize_direct(latest_snapshot_df["renewable_share_pct"])
-latest_snapshot_df["score_gas"] = _normalize_inverse(latest_snapshot_df["peak_hour_gas_share_pct"])
-latest_snapshot_df["score_clean"] = _normalize_direct(latest_snapshot_df["clean_coverage_ratio"])
-latest_snapshot_df["score_diversity"] = _normalize_direct(latest_snapshot_df["fuel_diversity_index"])
+latest_snapshot_df["score_carbon"] = _normalize_inverse(
+    latest_snapshot_df["carbon_intensity_kg_per_mwh"]
+)
+latest_snapshot_df["score_renewable"] = _normalize_direct(
+    latest_snapshot_df["renewable_share_pct"]
+)
+latest_snapshot_df["score_gas"] = _normalize_inverse(
+    latest_snapshot_df["peak_hour_gas_share_pct"]
+)
+latest_snapshot_df["score_clean"] = _normalize_direct(
+    latest_snapshot_df["clean_coverage_ratio"]
+)
+latest_snapshot_df["score_diversity"] = _normalize_direct(
+    latest_snapshot_df["fuel_diversity_index"]
+)
 
 latest_snapshot_df["strategic_health_score"] = (
     latest_snapshot_df["score_carbon"] * 0.25
@@ -532,16 +553,26 @@ focus_df = (
 
 kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
 
-kpi1.metric("Latest strategic snapshot", str(latest_date.date()) if pd.notna(latest_date) else "n/a")
+kpi1.metric(
+    "Latest strategic snapshot",
+    str(latest_date.date()) if pd.notna(latest_date) else "n/a",
+)
 kpi2.metric("Utilities in scope", f"{latest_snapshot_df['respondent'].nunique():,}")
 
 max_carbon = _safe_max(latest_snapshot_df["carbon_intensity_kg_per_mwh"])
 min_renewable = _safe_min(latest_snapshot_df["renewable_share_pct"])
 avg_score = latest_snapshot_df["strategic_health_score"].dropna().mean()
 
-kpi3.metric("Highest carbon intensity", f"{max_carbon:.1f}" if max_carbon is not None else "n/a")
-kpi4.metric("Lowest renewable share", f"{min_renewable:.1f}%" if min_renewable is not None else "n/a")
-kpi5.metric("Average strategic health", f"{avg_score:.1f}" if pd.notna(avg_score) else "n/a")
+kpi3.metric(
+    "Highest carbon intensity", f"{max_carbon:.1f}" if max_carbon is not None else "n/a"
+)
+kpi4.metric(
+    "Lowest renewable share",
+    f"{min_renewable:.1f}%" if min_renewable is not None else "n/a",
+)
+kpi5.metric(
+    "Average strategic health", f"{avg_score:.1f}" if pd.notna(avg_score) else "n/a"
+)
 
 st.caption(
     "This page focuses on long-term positioning rather than short-term operations. "
@@ -746,7 +777,8 @@ else:
         zmax = min(100.0, zmax + 1.0)
 
     flat_cols = [
-        col for col in heatmap_matrix.columns
+        col
+        for col in heatmap_matrix.columns
         if heatmap_matrix[col].nunique(dropna=True) <= 1
     ]
 
@@ -767,9 +799,7 @@ else:
             zmax=zmax,
             colorbar=dict(title="Score"),
             hovertemplate=(
-                "Utility: %{y}<br>"
-                "Metric: %{x}<br>"
-                "Score: %{z:.1f}<extra></extra>"
+                "Utility: %{y}<br>" "Metric: %{x}<br>" "Score: %{z:.1f}<extra></extra>"
             ),
         )
     )
@@ -791,7 +821,9 @@ st.divider()
 
 st.subheader(f"Selected Utility Summary: {focus_respondent}")
 
-focus_latest = latest_snapshot_df[latest_snapshot_df["respondent"] == focus_respondent].copy()
+focus_latest = latest_snapshot_df[
+    latest_snapshot_df["respondent"] == focus_respondent
+].copy()
 
 if focus_latest.empty:
     st.info("No latest summary is available for the selected utility.")
@@ -801,9 +833,13 @@ else:
     summary_col1, summary_col2, summary_col3, summary_col4 = st.columns(4)
 
     summary_col1.metric("Priority", str(focus_row["strategy_priority"]))
-    summary_col2.metric("Strategic health score", f"{focus_row['strategic_health_score']:.1f}")
+    summary_col2.metric(
+        "Strategic health score", f"{focus_row['strategic_health_score']:.1f}"
+    )
     summary_col3.metric("Renewable share", f"{focus_row['renewable_share_pct']:.1f}%")
-    summary_col4.metric("Carbon intensity", f"{focus_row['carbon_intensity_kg_per_mwh']:.1f}")
+    summary_col4.metric(
+        "Carbon intensity", f"{focus_row['carbon_intensity_kg_per_mwh']:.1f}"
+    )
 
     st.caption(
         "This summary shows the selected utility’s current long-term position based on the latest strategic snapshot."
@@ -827,12 +863,20 @@ gas_df = focus_df.dropna(subset=["peak_hour_gas_share_pct"]).copy()
 clean_df = focus_df.dropna(subset=["clean_coverage_ratio"]).copy()
 
 carbon_label, carbon_delta = _trend_delta_label(
-    carbon_df["carbon_intensity_kg_per_mwh"] if not carbon_df.empty else pd.Series(dtype=float),
+    (
+        carbon_df["carbon_intensity_kg_per_mwh"]
+        if not carbon_df.empty
+        else pd.Series(dtype=float)
+    ),
     higher_is_better=False,
 )
 
 renewable_label, renewable_delta = _trend_delta_label(
-    renewable_df["renewable_share_pct"] if not renewable_df.empty else pd.Series(dtype=float),
+    (
+        renewable_df["renewable_share_pct"]
+        if not renewable_df.empty
+        else pd.Series(dtype=float)
+    ),
     higher_is_better=True,
 )
 
@@ -846,11 +890,19 @@ clean_label, clean_delta = _trend_delta_label(
     higher_is_better=True,
 )
 
-trend_status_col1, trend_status_col2, trend_status_col3, trend_status_col4 = st.columns(4)
-trend_status_col1.metric("Carbon direction", carbon_label, _metric_delta_text(carbon_delta))
-trend_status_col2.metric("Renewable direction", renewable_label, _metric_delta_text(renewable_delta, "%"))
+trend_status_col1, trend_status_col2, trend_status_col3, trend_status_col4 = st.columns(
+    4
+)
+trend_status_col1.metric(
+    "Carbon direction", carbon_label, _metric_delta_text(carbon_delta)
+)
+trend_status_col2.metric(
+    "Renewable direction", renewable_label, _metric_delta_text(renewable_delta, "%")
+)
 trend_status_col3.metric("Gas direction", gas_label, _metric_delta_text(gas_delta, "%"))
-trend_status_col4.metric("Clean direction", clean_label, _metric_delta_text(clean_delta))
+trend_status_col4.metric(
+    "Clean direction", clean_label, _metric_delta_text(clean_delta)
+)
 
 trend_col1, trend_col2 = st.columns(2)
 
@@ -863,7 +915,10 @@ else:
         y="carbon_intensity_kg_per_mwh",
         markers=True,
         color_discrete_sequence=[COLOR_ORANGE],
-        labels={"date": "Date", "carbon_intensity_kg_per_mwh": "Carbon intensity (kg/MWh)"},
+        labels={
+            "date": "Date",
+            "carbon_intensity_kg_per_mwh": "Carbon intensity (kg/MWh)",
+        },
         title=f"Carbon Intensity Trend ({carbon_label})",
     )
     fig_carbon_trend.update_traces(line=dict(width=3), marker=dict(size=8))
@@ -931,8 +986,7 @@ st.divider()
 # ---------------------------------------------------------------------------
 
 with st.expander("How to explain this page to a client", expanded=False):
-    st.markdown(
-        """
+    st.markdown("""
 This page helps show which utilities are stronger or weaker from a long-term strategic perspective.
 
 It looks at:
@@ -947,12 +1001,10 @@ The goal is to help leadership quickly see:
 - which utilities need attention first
 - which utilities are improving
 - and which ones may need stronger transition planning
-"""
-    )
+""")
 
 with st.expander("How to explain trend charts to a client", expanded=False):
-    st.markdown(
-        """
+    st.markdown("""
 ### Carbon Intensity Trend
 - If the line goes **up**, the utility is becoming more carbon intensive.
 - If the line goes **down**, the utility is becoming cleaner.
@@ -975,8 +1027,7 @@ with st.expander("How to explain trend charts to a client", expanded=False):
 
 ### Best overall story
 A strong utility is not just one that looks good today — it is one that is moving in the right direction over time.
-"""
-    )
+""")
 
 # ---------------------------------------------------------------------------
 # Operational status

@@ -19,10 +19,14 @@ from pipeline_runtime import (
 
 logger = logging.getLogger(__name__)
 BRONZE_REPAIR_MAX_ATTEMPTS = int(os.getenv("AIRFLOW_BRONZE_REPAIR_MAX_ATTEMPTS", "5"))
-BRONZE_REPAIR_STALE_MINUTES = int(os.getenv("AIRFLOW_BRONZE_REPAIR_STALE_MINUTES", "60"))
+BRONZE_REPAIR_STALE_MINUTES = int(
+    os.getenv("AIRFLOW_BRONZE_REPAIR_STALE_MINUTES", "60")
+)
 
 
-def _load_existing_repair_jobs(cur, dataset_id: str) -> dict[tuple[datetime, datetime], str]:
+def _load_existing_repair_jobs(
+    cur, dataset_id: str
+) -> dict[tuple[datetime, datetime], str]:
     """Load existing repair jobs so enqueue logic can reuse or skip windows."""
 
     cur.execute(
@@ -34,7 +38,10 @@ def _load_existing_repair_jobs(cur, dataset_id: str) -> dict[tuple[datetime, dat
         (dataset_id,),
     )
     return {
-        (hour_start_utc.astimezone(timezone.utc), hour_end_utc.astimezone(timezone.utc)): status
+        (
+            hour_start_utc.astimezone(timezone.utc),
+            hour_end_utc.astimezone(timezone.utc),
+        ): status
         for hour_start_utc, hour_end_utc, status in cur.fetchall()
     }
 
@@ -89,7 +96,11 @@ def enqueue_bronze_repair_jobs(
     if not statuses:
         return 0
 
-    pending_limit = max_pending_override if max_pending_override is not None else int(os.getenv("AIRFLOW_BRONZE_REPAIR_MAX_PENDING", "24"))
+    pending_limit = (
+        max_pending_override
+        if max_pending_override is not None
+        else int(os.getenv("AIRFLOW_BRONZE_REPAIR_MAX_PENDING", "24"))
+    )
     boundary = _floor_to_step(datetime.now(timezone.utc), "hour")
 
     recover_stale_bronze_repair_jobs(dataset_id)
@@ -290,11 +301,15 @@ def mark_bronze_repair_failed(job_id: int, error_message: str) -> None:
         conn.commit()
     logger.error(
         "Marked bronze repair job failed %s",
-        format_log_fields(**current_airflow_log_fields(), job_id=job_id, error=error_message[:4000]),
+        format_log_fields(
+            **current_airflow_log_fields(), job_id=job_id, error=error_message[:4000]
+        ),
     )
 
 
-def trigger_repair_dag_if_idle(dataset_id: str, ignore_run_id: str | None = None) -> bool:
+def trigger_repair_dag_if_idle(
+    dataset_id: str, ignore_run_id: str | None = None
+) -> bool:
     """Trigger the repair DAG when pending repair work exists and no run is active."""
 
     repair_dag_id = f"{dataset_id}_bronze_hourly_repair"
@@ -339,23 +354,39 @@ def trigger_repair_dag_if_idle(dataset_id: str, ignore_run_id: str | None = None
     if not has_pending:
         logger.info(
             "Not triggering repair DAG because no pending jobs exist %s",
-            format_log_fields(**current_airflow_log_fields(), dataset_id=dataset_id, target_dag_id=repair_dag_id),
+            format_log_fields(
+                **current_airflow_log_fields(),
+                dataset_id=dataset_id,
+                target_dag_id=repair_dag_id,
+            ),
         )
         return False
 
     if active_runs > 0:
         logger.info(
             "Not triggering repair DAG because another run is active %s",
-            format_log_fields(**current_airflow_log_fields(), dataset_id=dataset_id, target_dag_id=repair_dag_id, active_runs=active_runs),
+            format_log_fields(
+                **current_airflow_log_fields(),
+                dataset_id=dataset_id,
+                target_dag_id=repair_dag_id,
+                active_runs=active_runs,
+            ),
         )
         return False
 
     from airflow.api.common.trigger_dag import trigger_dag
 
     run_id = f"repair_chain__{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f')}"
-    trigger_dag(dag_id=repair_dag_id, run_id=run_id, conf={"trigger_source": "repair_queue"})
+    trigger_dag(
+        dag_id=repair_dag_id, run_id=run_id, conf={"trigger_source": "repair_queue"}
+    )
     logger.info(
         "Triggered repair DAG because pending repair jobs exist and the DAG is idle %s",
-        format_log_fields(**current_airflow_log_fields(), dataset_id=dataset_id, target_dag_id=repair_dag_id, triggered_run_id=run_id),
+        format_log_fields(
+            **current_airflow_log_fields(),
+            dataset_id=dataset_id,
+            target_dag_id=repair_dag_id,
+            triggered_run_id=run_id,
+        ),
     )
     return True

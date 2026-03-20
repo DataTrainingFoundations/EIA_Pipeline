@@ -35,11 +35,12 @@ def _parse_cli_timestamp(value: str) -> datetime:
 
 def _subtarct_months(value: datetime, months: int) -> datetime:
     year = value.year
-    month=value.month - months
+    month = value.month - months
     while month <= 0:
         month += 12
         year -= 1
     return value.replace(year=year, month=month)
+
 
 def resolve_api_window_bounds(
     start: str,
@@ -53,7 +54,9 @@ def resolve_api_window_bounds(
     start_dt = _parse_cli_timestamp(start)
     end_dt = _parse_cli_timestamp(end)
     if end_dt <= start_dt:
-        raise ValueError(f"Invalid source window: end must be greater than start (start={start}, end={end})")
+        raise ValueError(
+            f"Invalid source window: end must be greater than start (start={start}, end={end})"
+        )
 
     if frequency == "hourly":
         last_included_hour = end_dt - timedelta(hours=1)
@@ -220,7 +223,7 @@ def electric_power_operational_data(api_key, offset=0, length=5000):
         "offset": offset,
         "length": length,
         "sort[0][column]": "period",
-        "sort[0][direction]": "desc"
+        "sort[0][direction]": "desc",
     }
 
     return requests.get(url, params=params)

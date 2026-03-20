@@ -23,20 +23,28 @@ def _install_fake_airflow(monkeypatch) -> None:  # noqa: ANN001
     python_sensor_module = ModuleType("airflow.sensors.python")
     utils_module = ModuleType("airflow.utils")
     trigger_rule_module = ModuleType("airflow.utils.trigger_rule")
-    operator_type = type("FakeOperator", (), {"__init__": lambda self, task_id, **kwargs: setattr(self, "task_id", task_id)})
+    operator_type = type(
+        "FakeOperator",
+        (),
+        {"__init__": lambda self, task_id, **kwargs: setattr(self, "task_id", task_id)},
+    )
     bash_module.BashOperator = operator_type
     python_module.PythonOperator = operator_type
     python_module.ShortCircuitOperator = operator_type
     python_module.get_current_context = lambda: {}
     external_task_module.ExternalTaskSensor = operator_type
     python_sensor_module.PythonSensor = operator_type
-    trigger_rule_module.TriggerRule = type("TriggerRule", (), {"ONE_FAILED": "one_failed"})
+    trigger_rule_module.TriggerRule = type(
+        "TriggerRule", (), {"ONE_FAILED": "one_failed"}
+    )
     monkeypatch.setitem(sys.modules, "airflow", airflow_module)
     monkeypatch.setitem(sys.modules, "airflow.operators", operators_module)
     monkeypatch.setitem(sys.modules, "airflow.operators.bash", bash_module)
     monkeypatch.setitem(sys.modules, "airflow.operators.python", python_module)
     monkeypatch.setitem(sys.modules, "airflow.sensors", sensors_module)
-    monkeypatch.setitem(sys.modules, "airflow.sensors.external_task", external_task_module)
+    monkeypatch.setitem(
+        sys.modules, "airflow.sensors.external_task", external_task_module
+    )
     monkeypatch.setitem(sys.modules, "airflow.sensors.python", python_sensor_module)
     monkeypatch.setitem(sys.modules, "airflow.utils", utils_module)
     monkeypatch.setitem(sys.modules, "airflow.utils.trigger_rule", trigger_rule_module)
@@ -53,7 +61,11 @@ def test_register_all_dags_returns_expected_keys(monkeypatch) -> None:  # noqa: 
     pipeline_factories = _load_module(monkeypatch, "pipeline_factories")
 
     dataset = {"topic": "eia_electricity_region_data"}
-    monkeypatch.setattr(pipeline_factories, "load_dataset_registry", lambda: {"electricity_region_data": dataset})
+    monkeypatch.setattr(
+        pipeline_factories,
+        "load_dataset_registry",
+        lambda: {"electricity_region_data": dataset},
+    )
     monkeypatch.setattr(
         pipeline_factories,
         "build_incremental_dag",
@@ -64,7 +76,11 @@ def test_register_all_dags_returns_expected_keys(monkeypatch) -> None:  # noqa: 
         "build_backfill_dag",
         lambda dataset_id, _dataset: {"dag_id": f"{dataset_id}_backfill"},
     )
-    monkeypatch.setattr(pipeline_factories, "build_grid_operations_dag", lambda: {"dag_id": "platinum_grid_operations_hourly"})
+    monkeypatch.setattr(
+        pipeline_factories,
+        "build_grid_operations_dag",
+        lambda: {"dag_id": "platinum_grid_operations_hourly"},
+    )
     monkeypatch.setattr(
         pipeline_factories,
         "build_resource_planning_dag",

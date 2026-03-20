@@ -18,12 +18,16 @@ from pyspark.sql import functions as F
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from common.config import load_spark_app_config
-from common.io import has_partitioned_parquet_input, merge_partitioned_parquet, read_parquet_if_exists, read_partitioned_parquet
+from common.io import (
+    has_partitioned_parquet_input,
+    merge_partitioned_parquet,
+    read_parquet_if_exists,
+    read_partitioned_parquet,
+)
 from common.logging_utils import configure_logging, log_job_complete, log_job_start
 from common.quality import assert_no_nulls, assert_non_negative, assert_unique_keys
 from common.spark_session import build_spark_session
 from common.windowing import filter_time_window
-
 
 SUPPORTED_DATASETS = ["electricity_region_data", "electricity_fuel_type_data", "all"]
 RENEWABLE_FUELS = ["SUN", "WND", "WAT", "GEO"]
@@ -46,12 +50,20 @@ EMISSIONS_FACTORS = {
 def parse_args() -> argparse.Namespace:
     """Parse CLI arguments for the curated Gold job."""
 
-    parser = argparse.ArgumentParser(description="Build curated Gold datasets for downstream serving marts.")
+    parser = argparse.ArgumentParser(
+        description="Build curated Gold datasets for downstream serving marts."
+    )
     parser.add_argument("--silver-base-path", default="s3a://silver")
     parser.add_argument("--dataset", choices=SUPPORTED_DATASETS, default="all")
-    parser.add_argument("--region-fact-path", default="s3a://gold/facts/region_demand_forecast_hourly")
-    parser.add_argument("--fuel-fact-path", default="s3a://gold/facts/fuel_generation_hourly")
-    parser.add_argument("--respondent-dim-path", default="s3a://gold/dimensions/respondent")
+    parser.add_argument(
+        "--region-fact-path", default="s3a://gold/facts/region_demand_forecast_hourly"
+    )
+    parser.add_argument(
+        "--fuel-fact-path", default="s3a://gold/facts/fuel_generation_hourly"
+    )
+    parser.add_argument(
+        "--respondent-dim-path", default="s3a://gold/dimensions/respondent"
+    )
     parser.add_argument("--fuel-dim-path", default="s3a://gold/dimensions/fuel_type")
     parser.add_argument("--start")
     parser.add_argument("--end")
@@ -63,8 +75,14 @@ def build_region_hourly_metrics(region_df: DataFrame) -> DataFrame:
 
     # Region rows can legitimately be revised across re-fetches for the same
     # business key. Gold keeps the latest loaded version for each key.
-    latest_window = Window.partitionBy("period", "respondent", "type").orderBy(F.col("loaded_at").desc(), F.col("event_id").desc())
-    stable_region_df = region_df.withColumn("record_rank", F.row_number().over(latest_window)).filter(F.col("record_rank") == 1).drop("record_rank")
+    latest_window = Window.partitionBy("period", "respondent", "type").orderBy(
+        F.col("loaded_at").desc(), F.col("event_id").desc()
+    )
+    stable_region_df = (
+        region_df.withColumn("record_rank", F.row_number().over(latest_window))
+        .filter(F.col("record_rank") == 1)
+        .drop("record_rank")
+    )
     demand_df = (
         stable_region_df.filter(F.col("type") == "D")
         .groupBy("period", "respondent", "event_date")
@@ -86,10 +104,16 @@ def build_region_hourly_metrics(region_df: DataFrame) -> DataFrame:
     )
 
     gold_df = (
-        demand_df.join(forecast_df, ["period", "respondent", "event_date"], "full_outer")
+        demand_df.join(
+            forecast_df, ["period", "respondent", "event_date"], "full_outer"
+        )
         .withColumn(
             "respondent_name",
-            F.coalesce(F.col("demand_respondent_name"), F.col("forecast_respondent_name"), F.col("respondent")),
+            F.coalesce(
+                F.col("demand_respondent_name"),
+                F.col("forecast_respondent_name"),
+                F.col("respondent"),
+            ),
         )
         .withColumn(
             "loaded_at",
@@ -98,14 +122,16 @@ def build_region_hourly_metrics(region_df: DataFrame) -> DataFrame:
         .withColumn(
             "forecast_error_mwh",
             F.when(
-                F.col("actual_demand_mwh").isNotNull() & F.col("day_ahead_forecast_mwh").isNotNull(),
+                F.col("actual_demand_mwh").isNotNull()
+                & F.col("day_ahead_forecast_mwh").isNotNull(),
                 F.col("actual_demand_mwh") - F.col("day_ahead_forecast_mwh"),
             ),
         )
         .withColumn(
             "forecast_error_pct",
             F.when(
-                F.col("day_ahead_forecast_mwh").isNotNull() & (F.col("day_ahead_forecast_mwh") != 0),
+                F.col("day_ahead_forecast_mwh").isNotNull()
+                & (F.col("day_ahead_forecast_mwh") != 0),
                 (F.col("forecast_error_mwh") / F.col("day_ahead_forecast_mwh")) * 100.0,
             ),
         )
@@ -123,9 +149,19 @@ def build_region_hourly_metrics(region_df: DataFrame) -> DataFrame:
         )
         .orderBy("period", "respondent")
     )
-    assert_no_nulls(gold_df, ["period", "event_date", "respondent", "respondent_name", "value_units"], "gold.fact_region_demand_forecast_hourly")
-    assert_unique_keys(gold_df, ["period", "respondent"], "gold.fact_region_demand_forecast_hourly")
-    assert_non_negative(gold_df, ["actual_demand_mwh", "day_ahead_forecast_mwh"], "gold.fact_region_demand_forecast_hourly")
+    assert_no_nulls(
+        gold_df,
+        ["period", "event_date", "respondent", "respondent_name", "value_units"],
+        "gold.fact_region_demand_forecast_hourly",
+    )
+    assert_unique_keys(
+        gold_df, ["period", "respondent"], "gold.fact_region_demand_forecast_hourly"
+    )
+    assert_non_negative(
+        gold_df,
+        ["actual_demand_mwh", "day_ahead_forecast_mwh"],
+        "gold.fact_region_demand_forecast_hourly",
+    )
     return gold_df
 
 
@@ -134,7 +170,9 @@ def build_fuel_type_hourly_generation(fuel_df: DataFrame) -> DataFrame:
 
     # Fuel rows can also be revised across re-fetches. Keep the latest version
     # per hourly business key before writing curated output.
-    latest_window = Window.partitionBy("period", "respondent", "fueltype").orderBy(F.col("loaded_at").desc(), F.col("event_id").desc())
+    latest_window = Window.partitionBy("period", "respondent", "fueltype").orderBy(
+        F.col("loaded_at").desc(), F.col("event_id").desc()
+    )
     gold_df = (
         fuel_df.withColumn("record_rank", F.row_number().over(latest_window))
         .filter(F.col("record_rank") == 1)
@@ -155,15 +193,29 @@ def build_fuel_type_hourly_generation(fuel_df: DataFrame) -> DataFrame:
     )
     assert_no_nulls(
         gold_df,
-        ["period", "event_date", "respondent", "respondent_name", "fueltype", "generation_mwh", "value_units"],
+        [
+            "period",
+            "event_date",
+            "respondent",
+            "respondent_name",
+            "fueltype",
+            "generation_mwh",
+            "value_units",
+        ],
         "gold.fact_fuel_generation_hourly",
     )
-    assert_unique_keys(gold_df, ["period", "respondent", "fueltype"], "gold.fact_fuel_generation_hourly")
+    assert_unique_keys(
+        gold_df,
+        ["period", "respondent", "fueltype"],
+        "gold.fact_fuel_generation_hourly",
+    )
     assert_non_negative(gold_df, ["generation_mwh"], "gold.fact_fuel_generation_hourly")
     return gold_df
 
 
-def write_partitioned(df: DataFrame, output_path: str, *, merge_keys: list[str]) -> None:
+def write_partitioned(
+    df: DataFrame, output_path: str, *, merge_keys: list[str]
+) -> None:
     """Write a fact dataset while preserving earlier rows in touched day partitions."""
 
     merge_partitioned_parquet(
@@ -175,7 +227,9 @@ def write_partitioned(df: DataFrame, output_path: str, *, merge_keys: list[str])
     )
 
 
-def build_respondent_dimension(spark, region_df: DataFrame | None, fuel_df: DataFrame | None, existing_path: str) -> DataFrame:  # noqa: ANN001
+def build_respondent_dimension(
+    spark, region_df: DataFrame | None, fuel_df: DataFrame | None, existing_path: str
+) -> DataFrame:  # noqa: ANN001
     """Build the respondent dimension from current observations plus prior state."""
 
     observations: list[DataFrame] = []
@@ -226,19 +280,27 @@ def build_respondent_dimension(spark, region_df: DataFrame | None, fuel_df: Data
             )
         )
     if not observations:
-        raise ValueError("gold.dim_respondent requires at least one region or fuel source")
+        raise ValueError(
+            "gold.dim_respondent requires at least one region or fuel source"
+        )
     observations_df = observations[0]
     for df in observations[1:]:
         observations_df = observations_df.unionByName(df)
-    latest_window = Window.partitionBy("respondent").orderBy(F.col("event_date").desc(), F.col("respondent_name").desc())
+    latest_window = Window.partitionBy("respondent").orderBy(
+        F.col("event_date").desc(), F.col("respondent_name").desc()
+    )
     latest_name_df = (
-        observations_df.filter(F.col("respondent").isNotNull() & F.col("respondent_name").isNotNull())
+        observations_df.filter(
+            F.col("respondent").isNotNull() & F.col("respondent_name").isNotNull()
+        )
         .withColumn("name_rank", F.row_number().over(latest_window))
         .filter(F.col("name_rank") == 1)
         .select("respondent", "respondent_name")
     )
     dim_df = (
-        observations_df.filter(F.col("respondent").isNotNull() & F.col("event_date").isNotNull())
+        observations_df.filter(
+            F.col("respondent").isNotNull() & F.col("event_date").isNotNull()
+        )
         .groupBy("respondent")
         .agg(
             F.min("event_date").alias("first_seen_date"),
@@ -261,15 +323,28 @@ def build_respondent_dimension(spark, region_df: DataFrame | None, fuel_df: Data
         )
         .withColumn("updated_at", F.current_timestamp())
         .drop("observed_source_dataset_count", "existing_source_dataset_count")
-        .select("respondent", "respondent_name", "first_seen_date", "last_seen_date", "source_dataset_count", "updated_at")
+        .select(
+            "respondent",
+            "respondent_name",
+            "first_seen_date",
+            "last_seen_date",
+            "source_dataset_count",
+            "updated_at",
+        )
         .orderBy("respondent")
     )
-    assert_no_nulls(dim_df, ["respondent", "respondent_name", "first_seen_date", "last_seen_date"], "gold.dim_respondent")
+    assert_no_nulls(
+        dim_df,
+        ["respondent", "respondent_name", "first_seen_date", "last_seen_date"],
+        "gold.dim_respondent",
+    )
     assert_unique_keys(dim_df, ["respondent"], "gold.dim_respondent")
     return dim_df
 
 
-def build_fuel_type_dimension(spark, fuel_df: DataFrame | None, existing_path: str) -> DataFrame:  # noqa: ANN001
+def build_fuel_type_dimension(
+    spark, fuel_df: DataFrame | None, existing_path: str
+) -> DataFrame:  # noqa: ANN001
     """Build the fuel-type dimension from current observations plus prior state."""
 
     observations: list[DataFrame] = []
@@ -300,14 +375,24 @@ def build_fuel_type_dimension(spark, fuel_df: DataFrame | None, existing_path: s
     observations_df = observations[0]
     for df in observations[1:]:
         observations_df = observations_df.unionByName(df)
-    latest_window = Window.partitionBy("fueltype").orderBy(F.col("event_date").desc(), F.col("fueltype_name").desc())
+    latest_window = Window.partitionBy("fueltype").orderBy(
+        F.col("event_date").desc(), F.col("fueltype_name").desc()
+    )
     latest_name_df = (
-        observations_df.filter(F.col("fueltype").isNotNull() & F.col("fueltype_name").isNotNull())
+        observations_df.filter(
+            F.col("fueltype").isNotNull() & F.col("fueltype_name").isNotNull()
+        )
         .withColumn("name_rank", F.row_number().over(latest_window))
         .filter(F.col("name_rank") == 1)
         .select("fueltype", "fueltype_name")
     )
-    emissions_expr = F.create_map(*[value for item in EMISSIONS_FACTORS.items() for value in (F.lit(item[0]), F.lit(item[1]))])
+    emissions_expr = F.create_map(
+        *[
+            value
+            for item in EMISSIONS_FACTORS.items()
+            for value in (F.lit(item[0]), F.lit(item[1]))
+        ]
+    )
     dim_df = (
         observations_df.filter(F.col("fueltype").isNotNull())
         .select("fueltype")
@@ -320,12 +405,23 @@ def build_fuel_type_dimension(spark, fuel_df: DataFrame | None, existing_path: s
             .when(F.col("fueltype") == "NUC", F.lit("nuclear"))
             .otherwise(F.lit("other")),
         )
-        .withColumn("emissions_factor_kg_per_mwh", F.coalesce(emissions_expr[F.col("fueltype")], F.lit(0.0)))
+        .withColumn(
+            "emissions_factor_kg_per_mwh",
+            F.coalesce(emissions_expr[F.col("fueltype")], F.lit(0.0)),
+        )
         .withColumn("updated_at", F.current_timestamp())
-        .select("fueltype", "fueltype_name", "fuel_category", "emissions_factor_kg_per_mwh", "updated_at")
+        .select(
+            "fueltype",
+            "fueltype_name",
+            "fuel_category",
+            "emissions_factor_kg_per_mwh",
+            "updated_at",
+        )
         .orderBy("fueltype")
     )
-    assert_no_nulls(dim_df, ["fueltype", "fueltype_name", "fuel_category"], "gold.dim_fuel_type")
+    assert_no_nulls(
+        dim_df, ["fueltype", "fueltype_name", "fuel_category"], "gold.dim_fuel_type"
+    )
     assert_unique_keys(dim_df, ["fueltype"], "gold.dim_fuel_type")
     assert_non_negative(dim_df, ["emissions_factor_kg_per_mwh"], "gold.dim_fuel_type")
     return dim_df
@@ -370,7 +466,11 @@ def main() -> None:
             )
             region_df = filter_time_window(region_df, "period", args.start, args.end)
             region_gold_df = build_region_hourly_metrics(region_df)
-            write_partitioned(region_gold_df, args.region_fact_path, merge_keys=["period", "respondent"])
+            write_partitioned(
+                region_gold_df,
+                args.region_fact_path,
+                merge_keys=["period", "respondent"],
+            )
         else:
             logger.info(
                 "Skipping Gold region fact build because no Silver input is available input_path=%s start=%s end=%s",
@@ -390,7 +490,11 @@ def main() -> None:
             )
             fuel_df = filter_time_window(fuel_df, "period", args.start, args.end)
             fuel_gold_df = build_fuel_type_hourly_generation(fuel_df)
-            write_partitioned(fuel_gold_df, args.fuel_fact_path, merge_keys=["period", "respondent", "fueltype"])
+            write_partitioned(
+                fuel_gold_df,
+                args.fuel_fact_path,
+                merge_keys=["period", "respondent", "fueltype"],
+            )
         else:
             logger.info(
                 "Skipping Gold fuel fact build because no Silver input is available input_path=%s start=%s end=%s",
@@ -400,7 +504,9 @@ def main() -> None:
             )
 
     if region_df is not None or fuel_df is not None:
-        respondent_dim_df = build_respondent_dimension(spark, region_df, fuel_df, args.respondent_dim_path)
+        respondent_dim_df = build_respondent_dimension(
+            spark, region_df, fuel_df, args.respondent_dim_path
+        )
         write_dimension(respondent_dim_df, args.respondent_dim_path)
 
     if fuel_df is not None:

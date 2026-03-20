@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from airflow.operators.python import PythonOperator
-from airflow.sensors.python import PythonSensor
 from airflow.sensors.external_task import ExternalTaskSensor
-
+from airflow.sensors.python import PythonSensor
 from pipeline_constants import (
+    GLOBAL_BACKFILL_POOL,
     GOLD_FUEL_FACT_HOURLY_PATH,
     GOLD_FUEL_TYPE_DIM_PATH,
     GOLD_REGION_FACT_HOURLY_PATH,
-    GLOBAL_BACKFILL_POOL,
     GOLD_RESPONDENT_DIM_PATH,
     SPARK_PACKAGES,
     SPARK_PACKAGES_WITH_POSTGRES,
@@ -31,7 +30,9 @@ def global_backfill_pool() -> str:
     return GLOBAL_BACKFILL_POOL
 
 
-def build_fetch_command(dataset_id: str, start_expression: str, end_expression: str, max_pages: int) -> str:
+def build_fetch_command(
+    dataset_id: str, start_expression: str, end_expression: str, max_pages: int
+) -> str:
     return (
         "PYTHONPATH=/workspace/ingestion "
         f"python -m src.fetch_eia --dataset {dataset_id} --start {start_expression} --end {end_expression} "
@@ -83,7 +84,9 @@ def build_silver_command(
     )
 
 
-def build_curated_gold_command(dataset_id: str, start_expression: str, end_expression: str) -> str:
+def build_curated_gold_command(
+    dataset_id: str, start_expression: str, end_expression: str
+) -> str:
     return build_spark_submit_command(
         "gold_region_fuel_serving_hourly.py",
         packages=SPARK_PACKAGES,
@@ -109,7 +112,9 @@ def build_curated_gold_command(dataset_id: str, start_expression: str, end_expre
     )
 
 
-def build_power_curated_gold_command(dataset: dict[str, str], start_expression: str, end_expression: str) -> str:
+def build_power_curated_gold_command(
+    dataset: dict[str, str], start_expression: str, end_expression: str
+) -> str:
     return build_spark_submit_command(
         "gold_power_operations_monthly.py",
         packages=SPARK_PACKAGES,
@@ -127,7 +132,9 @@ def build_power_curated_gold_command(dataset: dict[str, str], start_expression: 
     )
 
 
-def build_region_daily_platinum_command(stage_table: str, start_expression: str, end_expression: str) -> str:
+def build_region_daily_platinum_command(
+    stage_table: str, start_expression: str, end_expression: str
+) -> str:
     return build_spark_submit_command(
         "platinum_region_demand_daily.py",
         packages=SPARK_PACKAGES_WITH_POSTGRES,
@@ -147,7 +154,12 @@ def build_region_daily_platinum_command(stage_table: str, start_expression: str,
     )
 
 
-def build_power_operations_monthly_platinum_command(dataset: dict[str, str], stage_table: str, start_expression: str, end_expression: str) -> str:
+def build_power_operations_monthly_platinum_command(
+    dataset: dict[str, str],
+    stage_table: str,
+    start_expression: str,
+    end_expression: str,
+) -> str:
     return build_spark_submit_command(
         "platinum_power_operations_monthly.py",
         packages=SPARK_PACKAGES_WITH_POSTGRES,
@@ -167,7 +179,9 @@ def build_power_operations_monthly_platinum_command(dataset: dict[str, str], sta
     )
 
 
-def build_bronze_verification_command(dataset_id: str, dataset: dict[str, str], stage_table: str) -> str:
+def build_bronze_verification_command(
+    dataset_id: str, dataset: dict[str, str], stage_table: str
+) -> str:
     return build_spark_submit_command(
         "bronze_hourly_coverage_verify.py",
         packages=SPARK_PACKAGES_WITH_POSTGRES,
@@ -183,7 +197,13 @@ def build_bronze_verification_command(dataset_id: str, dataset: dict[str, str], 
     )
 
 
-def build_merge_task(task_id: str, target_table: str, stage_table: str, insert_columns: list[str], conflict_columns: list[str]) -> PythonOperator:
+def build_merge_task(
+    task_id: str,
+    target_table: str,
+    stage_table: str,
+    insert_columns: list[str],
+    conflict_columns: list[str],
+) -> PythonOperator:
     return PythonOperator(
         task_id=task_id,
         python_callable=merge_stage_into_target,
@@ -281,7 +301,9 @@ def map_to_hourly_incremental_run(logical_date, **_: object):  # noqa: ANN001
     return logical_date.replace(minute=0, second=0, microsecond=0)
 
 
-def build_curated_gold_sensor(task_id: str, upstream_dataset_id: str) -> ExternalTaskSensor:
+def build_curated_gold_sensor(
+    task_id: str, upstream_dataset_id: str
+) -> ExternalTaskSensor:
     return ExternalTaskSensor(
         task_id=task_id,
         external_dag_id=f"{upstream_dataset_id}_incremental",

@@ -17,7 +17,9 @@ def assert_no_nulls(df: DataFrame, columns: list[str], label: str) -> None:
 
     if null_filter is not None and not df.filter(null_filter).isEmpty():
         joined_columns = ", ".join(columns)
-        raise ValueError(f"{label} contains null values in required columns: {joined_columns}")
+        raise ValueError(
+            f"{label} contains null values in required columns: {joined_columns}"
+        )
 
 
 def assert_unique_keys(df: DataFrame, keys: list[str], label: str) -> None:
@@ -27,14 +29,22 @@ def assert_unique_keys(df: DataFrame, keys: list[str], label: str) -> None:
         raise ValueError(f"{label} contains duplicate keys: {joined_keys}")
 
 
-def assert_allowed_values(df: DataFrame, column_name: str, allowed_values: list[str], label: str) -> None:
-    invalid_df = df.filter(F.col(column_name).isNotNull() & (~F.col(column_name).isin(allowed_values)))
+def assert_allowed_values(
+    df: DataFrame, column_name: str, allowed_values: list[str], label: str
+) -> None:
+    invalid_df = df.filter(
+        F.col(column_name).isNotNull() & (~F.col(column_name).isin(allowed_values))
+    )
     if not invalid_df.isEmpty():
         joined_values = ", ".join(allowed_values)
-        raise ValueError(f"{label} contains unsupported values for {column_name}. Allowed values: {joined_values}")
+        raise ValueError(
+            f"{label} contains unsupported values for {column_name}. Allowed values: {joined_values}"
+        )
 
 
-def assert_no_conflicting_records(df: DataFrame, keys: list[str], value_columns: list[str], label: str) -> None:
+def assert_no_conflicting_records(
+    df: DataFrame, keys: list[str], value_columns: list[str], label: str
+) -> None:
     comparison_struct = F.struct(*[F.col(column_name) for column_name in value_columns])
     conflicts_df = (
         df.groupBy(*keys)
@@ -44,7 +54,9 @@ def assert_no_conflicting_records(df: DataFrame, keys: list[str], value_columns:
     if not conflicts_df.isEmpty():
         joined_keys = ", ".join(keys)
         joined_values = ", ".join(value_columns)
-        raise ValueError(f"{label} contains conflicting records for keys [{joined_keys}] across values [{joined_values}]")
+        raise ValueError(
+            f"{label} contains conflicting records for keys [{joined_keys}] across values [{joined_values}]"
+        )
 
 
 def count_duplicate_keys(df: DataFrame, keys: list[str]) -> int:
@@ -65,19 +77,34 @@ def assert_non_negative(df: DataFrame, columns: list[str], label: str) -> None:
     invalid_filter = None
     for column_name in columns:
         condition = F.col(column_name).isNotNull() & (F.col(column_name) < 0)
-        invalid_filter = condition if invalid_filter is None else (invalid_filter | condition)
+        invalid_filter = (
+            condition if invalid_filter is None else (invalid_filter | condition)
+        )
 
     if invalid_filter is not None and not df.filter(invalid_filter).isEmpty():
         joined_columns = ", ".join(columns)
-        raise ValueError(f"{label} contains negative values in columns: {joined_columns}")
+        raise ValueError(
+            f"{label} contains negative values in columns: {joined_columns}"
+        )
 
 
-def assert_value_bounds(df: DataFrame, column_name: str, *, min_value: float | None = None, max_value: float | None = None, label: str) -> None:
+def assert_value_bounds(
+    df: DataFrame,
+    column_name: str,
+    *,
+    min_value: float | None = None,
+    max_value: float | None = None,
+    label: str,
+) -> None:
     invalid_filter = F.lit(False)
     if min_value is not None:
-        invalid_filter = invalid_filter | (F.col(column_name).isNotNull() & (F.col(column_name) < F.lit(min_value)))
+        invalid_filter = invalid_filter | (
+            F.col(column_name).isNotNull() & (F.col(column_name) < F.lit(min_value))
+        )
     if max_value is not None:
-        invalid_filter = invalid_filter | (F.col(column_name).isNotNull() & (F.col(column_name) > F.lit(max_value)))
+        invalid_filter = invalid_filter | (
+            F.col(column_name).isNotNull() & (F.col(column_name) > F.lit(max_value))
+        )
 
     if not df.filter(invalid_filter).isEmpty():
         bounds: list[str] = []
@@ -85,4 +112,6 @@ def assert_value_bounds(df: DataFrame, column_name: str, *, min_value: float | N
             bounds.append(f">= {min_value}")
         if max_value is not None:
             bounds.append(f"<= {max_value}")
-        raise ValueError(f"{label} contains values outside bounds {' and '.join(bounds)} for column {column_name}")
+        raise ValueError(
+            f"{label} contains values outside bounds {' and '.join(bounds)} for column {column_name}"
+        )

@@ -7,14 +7,14 @@ import surface and central DAG registration entrypoint.
 
 from __future__ import annotations
 
-from airflow import DAG
-
 from pipeline_dataset_dags import (
     build_backfill_dag,
     build_incremental_dag,
 )
 from pipeline_serving_dags import build_grid_operations_dag, build_resource_planning_dag
 from pipeline_support import load_dataset_registry
+
+from airflow import DAG
 
 
 def register_all_dags() -> dict[str, DAG]:

@@ -1,5 +1,4 @@
 import streamlit as st
-
 from data_access import (
     get_backfill_status,
     get_connection,
@@ -26,20 +25,22 @@ except Exception as exc:  # pragma: no cover
     st.error(f"Database connection failed: {exc}")
     st.stop()
 
-tabs = st.tabs(["Grid Operations Manager", "Utility Strategy Director", "Resource Planning Lead"])
+tabs = st.tabs(
+    ["Grid Operations Manager", "Utility Strategy Director", "Resource Planning Lead"]
+)
 
 # GRID OPERATIONS MANAGER TAB
 with tabs[0]:
     st.subheader("Grid Operations Manager")
-    st.markdown(
-        """
+    st.markdown("""
         - Identify where immediate load risk or coverage stress needs attention
         - Triage forecast miss, ramp stress, and active alerts
         - Use trends as evidence after the current watchlist is clear
-        """
-    )
+        """)
     if hasattr(st, "page_link"):
-        st.page_link("pages/grid_operations_manager.py", label="Open Grid Operations Manager")
+        st.page_link(
+            "pages/grid_operations_manager.py", label="Open Grid Operations Manager"
+        )
     else:
         st.caption("Use the sidebar to open Grid Operations Manager.")
 
@@ -62,15 +63,15 @@ with tabs[0]:
 # UTILITY STRATEGY DIRECTOR TAB
 with tabs[1]:
     st.subheader("Utility Strategy Director")
-    st.markdown(
-        """
+    st.markdown("""
         - Evaluate portfolio-level risk and opportunities
         - Review fuel diversity, capacity, and grid resilience metrics
         - Monitor long-term trends to guide strategic planning
-        """
-    )
+        """)
     if hasattr(st, "page_link"):
-        st.page_link("pages/utility_strategy_director.py", label="Open Utility Strategy Director")
+        st.page_link(
+            "pages/utility_strategy_director.py", label="Open Utility Strategy Director"
+        )
     else:
         st.caption("Use the sidebar to open Utility Strategy Director.")
 
@@ -78,15 +79,15 @@ with tabs[1]:
 # RESOURCE PLANNING LEAD TAB
 with tabs[2]:
     st.subheader("Resource Planning Lead")
-    st.markdown(
-        """
+    st.markdown("""
         - Identify where structural planning attention is needed
         - Compare carbon intensity, renewable share, fuel diversity, and gas dependence
         - Use recent trends to explain why a region is on the watchlist
-        """
-    )
+        """)
     if hasattr(st, "page_link"):
-        st.page_link("pages/resource_planning_lead.py", label="Open Resource Planning Lead")
+        st.page_link(
+            "pages/resource_planning_lead.py", label="Open Resource Planning Lead"
+        )
     else:
         st.caption("Use the sidebar to open Resource Planning Lead.")
 

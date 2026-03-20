@@ -4,7 +4,6 @@ import argparse
 import sys
 
 import pytest
-
 from src import fetch_eia
 
 
@@ -39,13 +38,20 @@ def test_parse_args_and_select_datasets(monkeypatch) -> None:  # noqa: ANN001
     assert args.respondent == "PJM"
     assert args.dry_run is True
     assert "[start, end)" in fetch_eia.parse_args.__doc__
-    assert [dataset["id"] for dataset in selected] == ["electricity_region_data", "electricity_fuel_type_data"]
+    assert [dataset["id"] for dataset in selected] == [
+        "electricity_region_data",
+        "electricity_fuel_type_data",
+    ]
 
     with pytest.raises(ValueError, match="Unknown dataset"):
-        fetch_eia._select_datasets({"electricity_region_data": {"id": "electricity_region_data"}}, "missing")
+        fetch_eia._select_datasets(
+            {"electricity_region_data": {"id": "electricity_region_data"}}, "missing"
+        )
 
 
-def test_main_dry_run_builds_events_without_publishing(monkeypatch) -> None:  # noqa: ANN001
+def test_main_dry_run_builds_events_without_publishing(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     args = argparse.Namespace(
         dataset="electricity_region_data",
         start="2026-03-10T00",
@@ -75,7 +81,9 @@ def test_main_dry_run_builds_events_without_publishing(monkeypatch) -> None:  # 
     monkeypatch.setattr(
         fetch_eia,
         "fetch_dataset_rows",
-        lambda **kwargs: [{"period": "2026-03-10T00", "respondent": kwargs["respondent"]}],
+        lambda **kwargs: [
+            {"period": "2026-03-10T00", "respondent": kwargs["respondent"]}
+        ],
     )
 
     def fake_build_event(**kwargs):  # noqa: ANN001
@@ -83,7 +91,9 @@ def test_main_dry_run_builds_events_without_publishing(monkeypatch) -> None:  # 
         return {"event_id": "evt-1", "payload": kwargs["row"]}
 
     monkeypatch.setattr(fetch_eia, "build_event", fake_build_event)
-    monkeypatch.setattr(fetch_eia, "publish_events", lambda **kwargs: published.append(kwargs))
+    monkeypatch.setattr(
+        fetch_eia, "publish_events", lambda **kwargs: published.append(kwargs)
+    )
 
     fetch_eia.main()
 
@@ -93,7 +103,9 @@ def test_main_dry_run_builds_events_without_publishing(monkeypatch) -> None:  # 
     assert published == []
 
 
-def test_main_publishes_events_and_surfaces_validation_failures(monkeypatch) -> None:  # noqa: ANN001
+def test_main_publishes_events_and_surfaces_validation_failures(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     args = argparse.Namespace(
         dataset="electricity_region_data",
         start="2026-03-10T00",
@@ -113,17 +125,35 @@ def test_main_publishes_events_and_surfaces_validation_failures(monkeypatch) -> 
 
     monkeypatch.setattr(fetch_eia, "parse_args", lambda: args)
     monkeypatch.setenv("EIA_API_KEY", "test-key")
-    monkeypatch.setattr(fetch_eia, "load_dataset_registry", lambda _path: {"electricity_region_data": dataset})
-    monkeypatch.setattr(fetch_eia, "fetch_dataset_rows", lambda **kwargs: [{"period": "2026-03-10T00"}])
-    monkeypatch.setattr(fetch_eia, "build_event", lambda **kwargs: {"event_id": "evt-1", "payload": kwargs["row"]})
-    monkeypatch.setattr(fetch_eia, "publish_events", lambda **kwargs: published.append(kwargs) or 1)
+    monkeypatch.setattr(
+        fetch_eia,
+        "load_dataset_registry",
+        lambda _path: {"electricity_region_data": dataset},
+    )
+    monkeypatch.setattr(
+        fetch_eia, "fetch_dataset_rows", lambda **kwargs: [{"period": "2026-03-10T00"}]
+    )
+    monkeypatch.setattr(
+        fetch_eia,
+        "build_event",
+        lambda **kwargs: {"event_id": "evt-1", "payload": kwargs["row"]},
+    )
+    monkeypatch.setattr(
+        fetch_eia, "publish_events", lambda **kwargs: published.append(kwargs) or 1
+    )
 
     fetch_eia.main()
 
     assert published[0]["topic"] == "eia_region"
-    assert published[0]["events"] == [{"event_id": "evt-1", "payload": {"period": "2026-03-10T00"}}]
+    assert published[0]["events"] == [
+        {"event_id": "evt-1", "payload": {"period": "2026-03-10T00"}}
+    ]
 
-    monkeypatch.setattr(fetch_eia, "build_event", lambda **kwargs: (_ for _ in ()).throw(ValueError("bad row")))  # noqa: ARG005
+    monkeypatch.setattr(
+        fetch_eia,
+        "build_event",
+        lambda **kwargs: (_ for _ in ()).throw(ValueError("bad row")),
+    )  # noqa: ARG005
     with pytest.raises(RuntimeError, match="Validation failed"):
         fetch_eia.main()
 

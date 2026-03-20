@@ -98,14 +98,18 @@ def _install_fake_airflow(monkeypatch) -> None:  # noqa: ANN001
 
     utils_module = ModuleType("airflow.utils")
     trigger_rule_module = ModuleType("airflow.utils.trigger_rule")
-    trigger_rule_module.TriggerRule = type("TriggerRule", (), {"ONE_FAILED": "one_failed"})
+    trigger_rule_module.TriggerRule = type(
+        "TriggerRule", (), {"ONE_FAILED": "one_failed"}
+    )
 
     monkeypatch.setitem(sys.modules, "airflow", airflow_module)
     monkeypatch.setitem(sys.modules, "airflow.operators", operators_module)
     monkeypatch.setitem(sys.modules, "airflow.operators.bash", bash_module)
     monkeypatch.setitem(sys.modules, "airflow.operators.python", python_module)
     monkeypatch.setitem(sys.modules, "airflow.sensors", sensors_module)
-    monkeypatch.setitem(sys.modules, "airflow.sensors.external_task", external_task_module)
+    monkeypatch.setitem(
+        sys.modules, "airflow.sensors.external_task", external_task_module
+    )
     monkeypatch.setitem(sys.modules, "airflow.sensors.python", python_sensor_module)
     monkeypatch.setitem(sys.modules, "airflow.utils", utils_module)
     monkeypatch.setitem(sys.modules, "airflow.utils.trigger_rule", trigger_rule_module)
@@ -148,24 +152,58 @@ POWER_DATASET = {
 }
 
 
-def test_pipeline_builders_render_expected_commands_and_tasks(monkeypatch) -> None:  # noqa: ANN001
+def test_pipeline_builders_render_expected_commands_and_tasks(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     pipeline_builders = _load_module(monkeypatch, "pipeline_builders")
 
-    fetch_command = pipeline_builders.build_fetch_command("electricity_region_data", "2026-03-10T00", "2026-03-10T01", 20)
+    fetch_command = pipeline_builders.build_fetch_command(
+        "electricity_region_data", "2026-03-10T00", "2026-03-10T01", 20
+    )
     bronze_command = pipeline_builders.build_bronze_command(REGION_DATASET)
     bronze_pool = pipeline_builders.bronze_write_pool("electricity_region_data")
-    silver_command = pipeline_builders.build_silver_command(REGION_DATASET, "electricity_region_data", "start", "end", validation_only=True)
-    gold_command = pipeline_builders.build_curated_gold_command("electricity_region_data", "start", "end")
-    power_gold_command = pipeline_builders.build_power_curated_gold_command(POWER_DATASET, "start", "end")
-    platinum_command = pipeline_builders.build_region_daily_platinum_command("platinum.stage", "start", "end")
-    power_platinum_command = pipeline_builders.build_power_operations_monthly_platinum_command(POWER_DATASET, "platinum.power_stage", "start", "end")
-    verification_command = pipeline_builders.build_bronze_verification_command("electricity_region_data", REGION_DATASET, "ops.stage")
-    merge_task = pipeline_builders.build_merge_task("merge_stage", "target.table", "stage.table", ["id", "value"], ["id"])
-    validate_rows = pipeline_builders.build_validate_rows_task("validate_rows", "target.table", description="rows", allow_missing_table=True)
-    validate_distinct = pipeline_builders.build_validate_distinct_task("validate_distinct", "target.table", "respondent", description="distinct")
-    validate_bounds = pipeline_builders.build_validate_bounds_task("validate_bounds", "target.table", "coverage_ratio", description="bounds", min_value=0.0)
-    sensor = pipeline_builders.build_curated_gold_sensor("wait_for_region", "electricity_region_data")
-    first_backfill_sensor = pipeline_builders.build_first_backfill_sensor("wait_for_region_backfill", "electricity_region_data")
+    silver_command = pipeline_builders.build_silver_command(
+        REGION_DATASET, "electricity_region_data", "start", "end", validation_only=True
+    )
+    gold_command = pipeline_builders.build_curated_gold_command(
+        "electricity_region_data", "start", "end"
+    )
+    power_gold_command = pipeline_builders.build_power_curated_gold_command(
+        POWER_DATASET, "start", "end"
+    )
+    platinum_command = pipeline_builders.build_region_daily_platinum_command(
+        "platinum.stage", "start", "end"
+    )
+    power_platinum_command = (
+        pipeline_builders.build_power_operations_monthly_platinum_command(
+            POWER_DATASET, "platinum.power_stage", "start", "end"
+        )
+    )
+    verification_command = pipeline_builders.build_bronze_verification_command(
+        "electricity_region_data", REGION_DATASET, "ops.stage"
+    )
+    merge_task = pipeline_builders.build_merge_task(
+        "merge_stage", "target.table", "stage.table", ["id", "value"], ["id"]
+    )
+    validate_rows = pipeline_builders.build_validate_rows_task(
+        "validate_rows", "target.table", description="rows", allow_missing_table=True
+    )
+    validate_distinct = pipeline_builders.build_validate_distinct_task(
+        "validate_distinct", "target.table", "respondent", description="distinct"
+    )
+    validate_bounds = pipeline_builders.build_validate_bounds_task(
+        "validate_bounds",
+        "target.table",
+        "coverage_ratio",
+        description="bounds",
+        min_value=0.0,
+    )
+    sensor = pipeline_builders.build_curated_gold_sensor(
+        "wait_for_region", "electricity_region_data"
+    )
+    first_backfill_sensor = pipeline_builders.build_first_backfill_sensor(
+        "wait_for_region_backfill", "electricity_region_data"
+    )
 
     assert "python -m src.fetch_eia --dataset electricity_region_data" in fetch_command
     assert "BRONZE_OUTPUT_PATH=s3a://bronze/region" in bronze_command
@@ -187,15 +225,27 @@ def test_pipeline_builders_render_expected_commands_and_tasks(monkeypatch) -> No
     assert first_backfill_sensor.mode == "reschedule"
 
 
-def test_dataset_dag_builders_include_expected_tasks_for_region_and_fuel(monkeypatch) -> None:  # noqa: ANN001
+def test_dataset_dag_builders_include_expected_tasks_for_region_and_fuel(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     _load_module(monkeypatch, "pipeline_builders")
     pipeline_dataset_dags = _load_module(monkeypatch, "pipeline_dataset_dags")
 
-    incremental_region = pipeline_dataset_dags.build_incremental_dag("electricity_region_data", REGION_DATASET)
-    incremental_fuel = pipeline_dataset_dags.build_incremental_dag("electricity_fuel_type_data", FUEL_DATASET)
-    incremental_power = pipeline_dataset_dags.build_incremental_dag("electricity_power_operational_data", POWER_DATASET)
-    backfill_region = pipeline_dataset_dags.build_backfill_dag("electricity_region_data", REGION_DATASET)
-    backfill_power = pipeline_dataset_dags.build_backfill_dag("electricity_power_operational_data", POWER_DATASET)
+    incremental_region = pipeline_dataset_dags.build_incremental_dag(
+        "electricity_region_data", REGION_DATASET
+    )
+    incremental_fuel = pipeline_dataset_dags.build_incremental_dag(
+        "electricity_fuel_type_data", FUEL_DATASET
+    )
+    incremental_power = pipeline_dataset_dags.build_incremental_dag(
+        "electricity_power_operational_data", POWER_DATASET
+    )
+    backfill_region = pipeline_dataset_dags.build_backfill_dag(
+        "electricity_region_data", REGION_DATASET
+    )
+    backfill_power = pipeline_dataset_dags.build_backfill_dag(
+        "electricity_power_operational_data", POWER_DATASET
+    )
     assert incremental_region.kwargs["schedule"] == "@hourly"
     assert incremental_fuel.kwargs["schedule"] == "20 18 * * *"
     assert incremental_power.kwargs["schedule"] == "0 0 1 * *"
@@ -203,70 +253,202 @@ def test_dataset_dag_builders_include_expected_tasks_for_region_and_fuel(monkeyp
     assert "spark_platinum_stage" not in incremental_fuel.task_dict
     assert "spark_silver_batch" in incremental_power.task_dict
     assert "spark_curated_gold_batch" in incremental_power.task_dict
-    assert incremental_region.get_task("ingest_to_kafka").bash_command.endswith("--start {{ data_interval_start.in_timezone('UTC').strftime('%Y-%m-%dT%H') }} --end {{ data_interval_end.in_timezone('UTC').strftime('%Y-%m-%dT%H') }} --page-size 5000 --max-pages 20")
-    assert incremental_region.get_task("spark_curated_gold_batch").downstream_task_ids == {"spark_platinum_stage"}
-    assert '--start "{{ data_interval_start.in_timezone(\'UTC\').replace(hour=0, minute=0, second=0, microsecond=0).isoformat() }}" --end "{{ data_interval_end.in_timezone(\'UTC\').isoformat() }}"' in incremental_region.get_task("spark_platinum_stage").bash_command
-    assert incremental_region.get_task("spark_bronze_batch").pool == "electricity_region_data_bronze_write"
-    assert incremental_fuel.get_task("spark_bronze_batch").pool == "electricity_fuel_type_data_bronze_write"
-    assert "gold_power_operations_monthly.py" in incremental_power.get_task("spark_curated_gold_batch").bash_command
-    assert "platinum_power_operations_monthly.py" in incremental_power.get_task("spark_platinum_stage").bash_command
-    assert incremental_power.get_task("ingest_to_kafka").bash_command.endswith("--start {{ data_interval_start.in_timezone('UTC').isoformat() }} --end {{ data_interval_end.in_timezone('UTC').isoformat() }} --page-size 5000 --max-pages 20")
-    assert backfill_region.get_task("ingest_backfill_chunk").pool == "global_backfill_worker"
-    assert backfill_region.get_task("spark_bronze_backfill_batch").pool == "global_backfill_worker"
-    assert backfill_region.get_task("spark_silver_backfill").pool == "global_backfill_worker"
-    assert backfill_region.get_task("spark_curated_gold_backfill").pool == "global_backfill_worker"
+    assert incremental_region.get_task("ingest_to_kafka").bash_command.endswith(
+        "--start {{ data_interval_start.in_timezone('UTC').strftime('%Y-%m-%dT%H') }} --end {{ data_interval_end.in_timezone('UTC').strftime('%Y-%m-%dT%H') }} --page-size 5000 --max-pages 20"
+    )
+    assert incremental_region.get_task(
+        "spark_curated_gold_batch"
+    ).downstream_task_ids == {"spark_platinum_stage"}
+    assert (
+        "--start \"{{ data_interval_start.in_timezone('UTC').replace(hour=0, minute=0, second=0, microsecond=0).isoformat() }}\" --end \"{{ data_interval_end.in_timezone('UTC').isoformat() }}\""
+        in incremental_region.get_task("spark_platinum_stage").bash_command
+    )
+    assert (
+        incremental_region.get_task("spark_bronze_batch").pool
+        == "electricity_region_data_bronze_write"
+    )
+    assert (
+        incremental_fuel.get_task("spark_bronze_batch").pool
+        == "electricity_fuel_type_data_bronze_write"
+    )
+    assert (
+        "gold_power_operations_monthly.py"
+        in incremental_power.get_task("spark_curated_gold_batch").bash_command
+    )
+    assert (
+        "platinum_power_operations_monthly.py"
+        in incremental_power.get_task("spark_platinum_stage").bash_command
+    )
+    assert incremental_power.get_task("ingest_to_kafka").bash_command.endswith(
+        "--start {{ data_interval_start.in_timezone('UTC').isoformat() }} --end {{ data_interval_end.in_timezone('UTC').isoformat() }} --page-size 5000 --max-pages 20"
+    )
+    assert (
+        backfill_region.get_task("ingest_backfill_chunk").pool
+        == "global_backfill_worker"
+    )
+    assert (
+        backfill_region.get_task("spark_bronze_backfill_batch").pool
+        == "global_backfill_worker"
+    )
+    assert (
+        backfill_region.get_task("spark_silver_backfill").pool
+        == "global_backfill_worker"
+    )
+    assert (
+        backfill_region.get_task("spark_curated_gold_backfill").pool
+        == "global_backfill_worker"
+    )
     assert "spark_silver_backfill" in backfill_power.task_dict
-    assert backfill_power.get_task("spark_bronze_backfill_batch").pool == "global_backfill_worker"
-    assert "gold_power_operations_monthly.py" in backfill_power.get_task("spark_curated_gold_backfill").bash_command
-    assert "platinum_power_operations_monthly.py" in backfill_power.get_task("spark_platinum_backfill_stage").bash_command
-    assert backfill_power.get_task("mark_backfill_complete").upstream_task_ids == {"validate_backfill_nonnegative_demand"}
-    assert incremental_region.get_task("validate_platinum_rows").op_kwargs["allow_empty_result"] is True
-    assert incremental_region.get_task("validate_platinum_distinct_respondents").op_kwargs["allow_empty_result"] is True
-    assert incremental_region.get_task("validate_platinum_nonnegative_demand").op_kwargs["allow_empty_result"] is True
-    assert backfill_region.get_task("mark_backfill_complete").upstream_task_ids == {"validate_backfill_nonnegative_demand"}
+    assert (
+        backfill_power.get_task("spark_bronze_backfill_batch").pool
+        == "global_backfill_worker"
+    )
+    assert (
+        "gold_power_operations_monthly.py"
+        in backfill_power.get_task("spark_curated_gold_backfill").bash_command
+    )
+    assert (
+        "platinum_power_operations_monthly.py"
+        in backfill_power.get_task("spark_platinum_backfill_stage").bash_command
+    )
+    assert backfill_power.get_task("mark_backfill_complete").upstream_task_ids == {
+        "validate_backfill_nonnegative_demand"
+    }
+    assert (
+        incremental_region.get_task("validate_platinum_rows").op_kwargs[
+            "allow_empty_result"
+        ]
+        is True
+    )
+    assert (
+        incremental_region.get_task("validate_platinum_distinct_respondents").op_kwargs[
+            "allow_empty_result"
+        ]
+        is True
+    )
+    assert (
+        incremental_region.get_task("validate_platinum_nonnegative_demand").op_kwargs[
+            "allow_empty_result"
+        ]
+        is True
+    )
+    assert backfill_region.get_task("mark_backfill_complete").upstream_task_ids == {
+        "validate_backfill_nonnegative_demand"
+    }
     assert "trigger_backfill_if_idle" not in incremental_region.task_dict
     assert "trigger_backfill_if_idle" not in incremental_fuel.task_dict
     assert "trigger_backfill_if_idle" not in incremental_power.task_dict
     assert "trigger_next_backfill_if_idle" not in backfill_region.task_dict
-    assert "trigger_next_backfill_after_failure_if_idle" not in backfill_region.task_dict
-    assert backfill_region.get_task("validate_backfill_rows").op_kwargs["allow_empty_result"] is True
-    assert backfill_region.get_task("validate_backfill_distinct_respondents").op_kwargs["allow_empty_result"] is True
-    assert backfill_region.get_task("validate_backfill_nonnegative_demand").op_kwargs["allow_empty_result"] is True
+    assert (
+        "trigger_next_backfill_after_failure_if_idle" not in backfill_region.task_dict
+    )
+    assert (
+        backfill_region.get_task("validate_backfill_rows").op_kwargs[
+            "allow_empty_result"
+        ]
+        is True
+    )
+    assert (
+        backfill_region.get_task("validate_backfill_distinct_respondents").op_kwargs[
+            "allow_empty_result"
+        ]
+        is True
+    )
+    assert (
+        backfill_region.get_task("validate_backfill_nonnegative_demand").op_kwargs[
+            "allow_empty_result"
+        ]
+        is True
+    )
 
 
-def test_serving_dag_builders_include_validation_chain(monkeypatch) -> None:  # noqa: ANN001
+def test_serving_dag_builders_include_validation_chain(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     _load_module(monkeypatch, "pipeline_builders")
     pipeline_serving_dags = _load_module(monkeypatch, "pipeline_serving_dags")
 
     grid_dag = pipeline_serving_dags.build_grid_operations_dag()
     planning_dag = pipeline_serving_dags.build_resource_planning_dag()
 
-    assert grid_dag.get_task("wait_for_region_first_backfill").upstream_task_ids == set()
+    assert (
+        grid_dag.get_task("wait_for_region_first_backfill").upstream_task_ids == set()
+    )
     assert grid_dag.get_task("wait_for_fuel_first_backfill").upstream_task_ids == set()
-    assert grid_dag.get_task("build_grid_operations_hourly_stage").upstream_task_ids == {
+    assert grid_dag.get_task(
+        "build_grid_operations_hourly_stage"
+    ).upstream_task_ids == {
         "wait_for_region_first_backfill",
         "wait_for_fuel_first_backfill",
     }
-    assert grid_dag.get_task("validate_grid_operations_renewable_share").upstream_task_ids == {"validate_grid_operations_coverage_ratio"}
-    assert grid_dag.get_task("validate_grid_operations_rows").op_kwargs["allow_empty_result"] is True
-    assert grid_dag.get_task("validate_grid_operations_respondents").op_kwargs["allow_empty_result"] is True
-    assert grid_dag.get_task("validate_grid_operations_coverage_ratio").op_kwargs["allow_empty_result"] is True
-    assert grid_dag.get_task("validate_grid_operations_renewable_share").op_kwargs["allow_empty_result"] is True
-    assert planning_dag.get_task("validate_resource_planning_carbon_intensity").upstream_task_ids == {
-        "validate_resource_planning_renewable_share"
-    }
-    assert planning_dag.get_task("wait_for_fuel_first_backfill").upstream_task_ids == set()
-    assert planning_dag.get_task("build_resource_planning_daily_stage").upstream_task_ids == {
+    assert grid_dag.get_task(
+        "validate_grid_operations_renewable_share"
+    ).upstream_task_ids == {"validate_grid_operations_coverage_ratio"}
+    assert (
+        grid_dag.get_task("validate_grid_operations_rows").op_kwargs[
+            "allow_empty_result"
+        ]
+        is True
+    )
+    assert (
+        grid_dag.get_task("validate_grid_operations_respondents").op_kwargs[
+            "allow_empty_result"
+        ]
+        is True
+    )
+    assert (
+        grid_dag.get_task("validate_grid_operations_coverage_ratio").op_kwargs[
+            "allow_empty_result"
+        ]
+        is True
+    )
+    assert (
+        grid_dag.get_task("validate_grid_operations_renewable_share").op_kwargs[
+            "allow_empty_result"
+        ]
+        is True
+    )
+    assert planning_dag.get_task(
+        "validate_resource_planning_carbon_intensity"
+    ).upstream_task_ids == {"validate_resource_planning_renewable_share"}
+    assert (
+        planning_dag.get_task("wait_for_fuel_first_backfill").upstream_task_ids == set()
+    )
+    assert planning_dag.get_task(
+        "build_resource_planning_daily_stage"
+    ).upstream_task_ids == {
         "wait_for_region_first_backfill",
         "wait_for_fuel_first_backfill",
     }
-    assert planning_dag.get_task("validate_resource_planning_rows").op_kwargs["allow_empty_result"] is True
-    assert planning_dag.get_task("validate_resource_planning_respondents").op_kwargs["allow_empty_result"] is True
-    assert planning_dag.get_task("validate_resource_planning_renewable_share").op_kwargs["allow_empty_result"] is True
-    assert planning_dag.get_task("validate_resource_planning_carbon_intensity").op_kwargs["allow_empty_result"] is True
+    assert (
+        planning_dag.get_task("validate_resource_planning_rows").op_kwargs[
+            "allow_empty_result"
+        ]
+        is True
+    )
+    assert (
+        planning_dag.get_task("validate_resource_planning_respondents").op_kwargs[
+            "allow_empty_result"
+        ]
+        is True
+    )
+    assert (
+        planning_dag.get_task("validate_resource_planning_renewable_share").op_kwargs[
+            "allow_empty_result"
+        ]
+        is True
+    )
+    assert (
+        planning_dag.get_task("validate_resource_planning_carbon_intensity").op_kwargs[
+            "allow_empty_result"
+        ]
+        is True
+    )
 
 
-def test_factories_and_support_wrapper_integrate_with_real_registry(monkeypatch) -> None:  # noqa: ANN001
+def test_factories_and_support_wrapper_integrate_with_real_registry(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     pipeline_runtime = _load_module(monkeypatch, "pipeline_runtime")
     pipeline_support = _load_module(monkeypatch, "pipeline_support")
     pipeline_factories = _load_module(monkeypatch, "pipeline_factories")
@@ -283,7 +465,10 @@ def test_factories_and_support_wrapper_integrate_with_real_registry(monkeypatch)
         "platinum_grid_operations_hourly",
         "platinum_resource_planning_daily",
     }
-    assert pipeline_support.build_spark_submit_command is pipeline_runtime.build_spark_submit_command
+    assert (
+        pipeline_support.build_spark_submit_command
+        is pipeline_runtime.build_spark_submit_command
+    )
     assert pipeline_support.validate_table_has_rows is not None
 
 

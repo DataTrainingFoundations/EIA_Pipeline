@@ -28,12 +28,20 @@ def test_parse_platinum_args_defaults(monkeypatch) -> None:  # noqa: ANN001
 def test_gold_main_skips_missing_partitioned_input(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(
         "sys.argv",
-        ["gold_region_fuel_serving_hourly.py", "--dataset", "electricity_fuel_type_data"],
+        [
+            "gold_region_fuel_serving_hourly.py",
+            "--dataset",
+            "electricity_fuel_type_data",
+        ],
     )
     monkeypatch.setattr(gold_job, "configure_logging", lambda: None)
     monkeypatch.setattr(gold_job, "load_spark_app_config", lambda: SimpleNamespace())
-    monkeypatch.setattr(gold_job, "build_spark_session", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(gold_job, "has_partitioned_parquet_input", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        gold_job, "build_spark_session", lambda *_args, **_kwargs: object()
+    )
+    monkeypatch.setattr(
+        gold_job, "has_partitioned_parquet_input", lambda *_args, **_kwargs: False
+    )
     monkeypatch.setattr(gold_job, "log_job_start", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(gold_job, "log_job_complete", lambda *_args, **_kwargs: None)
 

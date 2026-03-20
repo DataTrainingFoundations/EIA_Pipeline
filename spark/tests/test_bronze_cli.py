@@ -4,7 +4,12 @@ from jobs.bronze_kafka_to_minio import _normalize_batch_starting_offsets, parse_
 def test_parse_args_topic_required(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(
         "sys.argv",
-        ["bronze_kafka_to_minio.py", "--topic", "eia_electricity_region_data", "--trigger-available-now"],
+        [
+            "bronze_kafka_to_minio.py",
+            "--topic",
+            "eia_electricity_region_data",
+            "--trigger-available-now",
+        ],
     )
     args = parse_args()
     assert args.topic == "eia_electricity_region_data"

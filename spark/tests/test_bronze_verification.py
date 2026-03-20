@@ -22,7 +22,11 @@ def test_build_hourly_coverage_df_marks_missing_and_partial(spark_session) -> No
         datetime(2026, 1, 1, 4, 0, tzinfo=timezone.utc),
     )
     rows = {
-        row["hour_label"]: (row["observed_row_count"], row["status"], row["expected_row_count"])
+        row["hour_label"]: (
+            row["observed_row_count"],
+            row["status"],
+            row["expected_row_count"],
+        )
         for row in coverage_df.selectExpr(
             "date_format(hour_start_utc, 'yyyy-MM-dd HH') as hour_label",
             "observed_row_count",

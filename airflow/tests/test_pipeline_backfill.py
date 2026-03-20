@@ -49,11 +49,25 @@ class FakeConnection:
         return None
 
 
-def test_enqueue_backfill_jobs_inserts_newest_windows_first(monkeypatch) -> None:  # noqa: ANN001
+def test_enqueue_backfill_jobs_inserts_newest_windows_first(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     cursor = FakeCursor()
     monkeypatch.setattr(pipeline_backfill, "db_connect", lambda: FakeConnection(cursor))
-    monkeypatch.setattr(pipeline_backfill, "get_dataset", lambda _dataset_id: {"backfill": {"start": "2026-03-08T00:00:00+00:00", "step": "day", "max_pending_chunks": 2}})
-    monkeypatch.setattr(pipeline_backfill, "recover_stale_backfill_jobs", lambda _dataset_id: 0)
+    monkeypatch.setattr(
+        pipeline_backfill,
+        "get_dataset",
+        lambda _dataset_id: {
+            "backfill": {
+                "start": "2026-03-08T00:00:00+00:00",
+                "step": "day",
+                "max_pending_chunks": 2,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        pipeline_backfill, "recover_stale_backfill_jobs", lambda _dataset_id: 0
+    )
     monkeypatch.setattr(pipeline_backfill, "datetime", FixedDatetime)
 
     inserted = pipeline_backfill.enqueue_backfill_jobs("electricity_region_data")
@@ -65,18 +79,30 @@ def test_enqueue_backfill_jobs_inserts_newest_windows_first(monkeypatch) -> None
     assert cursor.inserted_params[1][2].isoformat() == "2026-03-09T00:00:00+00:00"
 
 
-def test_enqueue_backfill_jobs_uses_month_windows_for_monthly_datasets(monkeypatch) -> None:  # noqa: ANN001
+def test_enqueue_backfill_jobs_uses_month_windows_for_monthly_datasets(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     cursor = FakeCursor()
     monkeypatch.setattr(pipeline_backfill, "db_connect", lambda: FakeConnection(cursor))
     monkeypatch.setattr(
         pipeline_backfill,
         "get_dataset",
-        lambda _dataset_id: {"backfill": {"start": "2026-01-01T00:00:00+00:00", "step": "month", "max_pending_chunks": 2}},
+        lambda _dataset_id: {
+            "backfill": {
+                "start": "2026-01-01T00:00:00+00:00",
+                "step": "month",
+                "max_pending_chunks": 2,
+            }
+        },
     )
-    monkeypatch.setattr(pipeline_backfill, "recover_stale_backfill_jobs", lambda _dataset_id: 0)
+    monkeypatch.setattr(
+        pipeline_backfill, "recover_stale_backfill_jobs", lambda _dataset_id: 0
+    )
     monkeypatch.setattr(pipeline_backfill, "datetime", FixedDatetime)
 
-    inserted = pipeline_backfill.enqueue_backfill_jobs("electricity_power_operational_data")
+    inserted = pipeline_backfill.enqueue_backfill_jobs(
+        "electricity_power_operational_data"
+    )
 
     assert inserted == 2
     assert cursor.inserted_params[0][1].isoformat() == "2026-02-01T00:00:00+00:00"
@@ -85,21 +111,32 @@ def test_enqueue_backfill_jobs_uses_month_windows_for_monthly_datasets(monkeypat
     assert cursor.inserted_params[1][2].isoformat() == "2026-02-01T00:00:00+00:00"
 
 
-def test_has_completed_backfill_returns_true_when_completed_exists(monkeypatch) -> None:  # noqa: ANN001
+def test_has_completed_backfill_returns_true_when_completed_exists(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     cursor = FakeCursor(values=[(True,)])
     monkeypatch.setattr(pipeline_backfill, "db_connect", lambda: FakeConnection(cursor))
 
     assert pipeline_backfill.has_completed_backfill("electricity_region_data") is True
 
 
-def test_trigger_backfill_dag_if_idle_triggers_when_pending_and_idle(monkeypatch) -> None:  # noqa: ANN001
+def test_trigger_backfill_dag_if_idle_triggers_when_pending_and_idle(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     import sys
     import types
 
     triggered: list[dict] = []
     cursor = FakeCursor(values=[(True,), (0,)])
     monkeypatch.setattr(pipeline_backfill, "db_connect", lambda: FakeConnection(cursor))
-    monkeypatch.setitem(sys.modules, "airflow.api.common.trigger_dag", types.SimpleNamespace(trigger_dag=lambda **kwargs: triggered.append(kwargs)))
+    monkeypatch.setitem(
+        sys.modules,
+        "airflow.api.common.trigger_dag",
+        types.SimpleNamespace(trigger_dag=lambda **kwargs: triggered.append(kwargs)),
+    )
 
-    assert pipeline_backfill.trigger_backfill_dag_if_idle("electricity_region_data") is True
+    assert (
+        pipeline_backfill.trigger_backfill_dag_if_idle("electricity_region_data")
+        is True
+    )
     assert triggered[0]["dag_id"] == "electricity_region_data_backfill"

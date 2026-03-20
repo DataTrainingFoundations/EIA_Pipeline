@@ -2,13 +2,26 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
+from pipeline_builders import (
+    build_bronze_verification_command,
+    build_merge_task,
+    build_validate_bounds_task,
+    build_validate_distinct_task,
+    build_validate_rows_task,
+)
+from pipeline_constants import (
+    BRONZE_HOURLY_COVERAGE_COLUMNS,
+    BRONZE_VERIFICATION_SCHEDULE,
+)
+from pipeline_support import (
+    enqueue_bronze_repair_jobs,
+    get_dataset,
+    trigger_repair_dag_if_idle,
+)
 
-from pipeline_builders import build_bronze_verification_command, build_merge_task, build_validate_bounds_task, build_validate_distinct_task, build_validate_rows_task
-from pipeline_constants import BRONZE_HOURLY_COVERAGE_COLUMNS, BRONZE_VERIFICATION_SCHEDULE
-from pipeline_support import enqueue_bronze_repair_jobs, get_dataset, trigger_repair_dag_if_idle
+from airflow import DAG
 
 DATASET = get_dataset("electricity_fuel_type_data")
 
@@ -26,7 +39,9 @@ with DAG(
 
     verify = BashOperator(
         task_id="build_bronze_hourly_coverage_stage",
-        bash_command=build_bronze_verification_command("electricity_fuel_type_data", DATASET, stage_table),
+        bash_command=build_bronze_verification_command(
+            "electricity_fuel_type_data", DATASET, stage_table
+        ),
     )
     validate_stage_rows = build_validate_rows_task(
         "validate_bronze_hourly_coverage_stage_rows",
@@ -71,7 +86,11 @@ with DAG(
     enqueue_repairs = PythonOperator(
         task_id="enqueue_bronze_repair_candidates",
         python_callable=enqueue_bronze_repair_jobs,
-        op_kwargs={"dataset_id": "electricity_fuel_type_data", "statuses": ("missing",), "max_pending_override": 0},
+        op_kwargs={
+            "dataset_id": "electricity_fuel_type_data",
+            "statuses": ("missing",),
+            "max_pending_override": 0,
+        },
     )
     trigger_repairs = PythonOperator(
         task_id="trigger_bronze_repair_if_idle",
@@ -79,4 +98,13 @@ with DAG(
         op_kwargs={"dataset_id": "electricity_fuel_type_data"},
     )
 
-    verify >> validate_stage_rows >> merge >> validate_rows >> validate_distinct_hours >> validate_non_negative_counts >> enqueue_repairs >> trigger_repairs
+    (
+        verify
+        >> validate_stage_rows
+        >> merge
+        >> validate_rows
+        >> validate_distinct_hours
+        >> validate_non_negative_counts
+        >> enqueue_repairs
+        >> trigger_repairs
+    )

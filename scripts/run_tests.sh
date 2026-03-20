@@ -10,37 +10,52 @@ HTML_PATH="$REPORT_DIR/pytest-report.html"
 COVERAGE_PATH="$REPO_ROOT/htmlcov/index.html"
 QUALITY_TARGETS=(ingestion airflow app spark)
 
+if command -v python >/dev/null 2>&1; then
+  PYTHON_BIN=(python)
+elif command -v python.exe >/dev/null 2>&1; then
+  PYTHON_BIN=(python.exe)
+elif command -v py.exe >/dev/null 2>&1; then
+  PYTHON_BIN=(py.exe -3)
+elif command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN=(python3)
+elif command -v py >/dev/null 2>&1; then
+  PYTHON_BIN=(py -3)
+else
+  echo "Python interpreter not found on PATH." >&2
+  exit 1
+fi
+
 case "$MODE" in
   lint)
-    ruff check "${QUALITY_TARGETS[@]}"
+    "${PYTHON_BIN[@]}" -m ruff check "${QUALITY_TARGETS[@]}"
     ;;
   format)
-    black "${QUALITY_TARGETS[@]}"
-    ruff check --fix "${QUALITY_TARGETS[@]}"
+    "${PYTHON_BIN[@]}" -m black "${QUALITY_TARGETS[@]}"
+    "${PYTHON_BIN[@]}" -m ruff check --fix "${QUALITY_TARGETS[@]}"
     ;;
   format-check)
-    black --check "${QUALITY_TARGETS[@]}"
+    "${PYTHON_BIN[@]}" -m black --check "${QUALITY_TARGETS[@]}"
     ;;
   quality)
-    ruff check "${QUALITY_TARGETS[@]}"
-    black --check "${QUALITY_TARGETS[@]}"
-    pytest -q
+    "${PYTHON_BIN[@]}" -m ruff check "${QUALITY_TARGETS[@]}"
+    "${PYTHON_BIN[@]}" -m black --check "${QUALITY_TARGETS[@]}"
+    "${PYTHON_BIN[@]}" -m pytest -q
     ;;
   fast)
-    pytest -q ingestion/tests airflow/tests app/tests spark/tests/test_config.py spark/tests/test_bronze_cli.py spark/tests/test_gold_platinum_cli.py spark/tests/test_persona_cli.py spark/tests/test_silver_cli.py spark/tests/test_logging_utils.py
+    "${PYTHON_BIN[@]}" -m pytest -q ingestion/tests airflow/tests app/tests spark/tests/test_config.py spark/tests/test_bronze_cli.py spark/tests/test_gold_platinum_cli.py spark/tests/test_persona_cli.py spark/tests/test_silver_cli.py spark/tests/test_logging_utils.py
     ;;
   app-airflow)
-    pytest -q airflow/tests app/tests
+    "${PYTHON_BIN[@]}" -m pytest -q airflow/tests app/tests
     ;;
   spark)
-    pytest -q spark/tests
+    "${PYTHON_BIN[@]}" -m pytest -q spark/tests
     ;;
   all)
-    pytest -q
+    "${PYTHON_BIN[@]}" -m pytest -q
     ;;
   coverage)
     mkdir -p "$REPORT_DIR"
-    pytest \
+    "${PYTHON_BIN[@]}" -m pytest \
       --cov=ingestion/src \
       --cov=airflow/dags \
       --cov=app \
@@ -54,7 +69,7 @@ case "$MODE" in
       --junitxml="$JUNIT_PATH" \
       --html="$HTML_PATH" \
       --self-contained-html
-    python - "$JUNIT_PATH" <<'PY'
+    "${PYTHON_BIN[@]}" - "$JUNIT_PATH" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
 

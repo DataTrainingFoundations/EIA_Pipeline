@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pandas as pd
-
 import planning_page_logic
 
 
@@ -112,7 +111,10 @@ def test_derive_planning_driver_uses_fixed_precedence() -> None:
             "avg_abs_forecast_error_pct": 8.0,
         }
     )
-    assert planning_page_logic.derive_planning_driver(row, thresholds) == "High carbon intensity"
+    assert (
+        planning_page_logic.derive_planning_driver(row, thresholds)
+        == "High carbon intensity"
+    )
 
     assert (
         planning_page_logic.derive_planning_driver(
@@ -215,10 +217,34 @@ def test_build_priority_history_uses_fixed_thresholds_for_daily_bucket_counts() 
     history_df = planning_page_logic.build_priority_history(planning_df, thresholds)
 
     assert history_df.to_dict("records") == [
-        {"date": pd.Timestamp("2026-03-01"), "planning_priority": "Critical", "respondent_count": 2},
-        {"date": pd.Timestamp("2026-03-01"), "planning_priority": "Elevated", "respondent_count": 1},
-        {"date": pd.Timestamp("2026-03-01"), "planning_priority": "Stable", "respondent_count": 0},
-        {"date": pd.Timestamp("2026-03-02"), "planning_priority": "Critical", "respondent_count": 1},
-        {"date": pd.Timestamp("2026-03-02"), "planning_priority": "Elevated", "respondent_count": 1},
-        {"date": pd.Timestamp("2026-03-02"), "planning_priority": "Stable", "respondent_count": 1},
+        {
+            "date": pd.Timestamp("2026-03-01"),
+            "planning_priority": "Critical",
+            "respondent_count": 2,
+        },
+        {
+            "date": pd.Timestamp("2026-03-01"),
+            "planning_priority": "Elevated",
+            "respondent_count": 1,
+        },
+        {
+            "date": pd.Timestamp("2026-03-01"),
+            "planning_priority": "Stable",
+            "respondent_count": 0,
+        },
+        {
+            "date": pd.Timestamp("2026-03-02"),
+            "planning_priority": "Critical",
+            "respondent_count": 1,
+        },
+        {
+            "date": pd.Timestamp("2026-03-02"),
+            "planning_priority": "Elevated",
+            "respondent_count": 1,
+        },
+        {
+            "date": pd.Timestamp("2026-03-02"),
+            "planning_priority": "Stable",
+            "respondent_count": 1,
+        },
     ]

@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.storagelevel import StorageLevel
 from pyspark.sql.functions import (
     col,
     current_timestamp,
@@ -23,13 +22,16 @@ from pyspark.sql.functions import (
     from_json,
     hour,
     lit,
-    max as spark_max,
     month,
     to_date,
     to_timestamp,
     year,
 )
+from pyspark.sql.functions import (
+    max as spark_max,
+)
 from pyspark.sql.types import StringType, StructField, StructType
+from pyspark.storagelevel import StorageLevel
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -41,7 +43,13 @@ from common.schemas import KAFKA_EVENT_SCHEMA
 from common.spark_session import build_spark_session
 
 logger = logging.getLogger(__name__)
-PARTITION_COLUMNS = ["dataset_partition", "event_year", "event_month", "event_day", "event_hour"]
+PARTITION_COLUMNS = [
+    "dataset_partition",
+    "event_year",
+    "event_month",
+    "event_day",
+    "event_hour",
+]
 
 
 @dataclass(frozen=True)
@@ -85,7 +93,14 @@ def transform_kafka_batch(raw_df: DataFrame) -> DataFrame:
     )
     transformed_df = (
         parsed_df.filter(col("event").isNotNull())
-        .select("event.*", "raw_json", "kafka_topic", "kafka_partition", "kafka_offset", "kafka_timestamp")
+        .select(
+            "event.*",
+            "raw_json",
+            "kafka_topic",
+            "kafka_partition",
+            "kafka_offset",
+            "kafka_timestamp",
+        )
         .withColumn("event_ts", to_timestamp(col("event_timestamp")))
         .withColumn("ingestion_ts", to_timestamp(col("ingestion_timestamp")))
         .withColumn("bronze_loaded_at", current_timestamp())
@@ -95,9 +110,15 @@ def transform_kafka_batch(raw_df: DataFrame) -> DataFrame:
         .withColumn("event_month", month(col("event_ts")))
         .withColumn("event_day", dayofmonth(col("event_ts")))
         .withColumn("event_hour", hour(col("event_ts")))
-        .filter(col("event_ts").isNotNull() & col("event_id").isNotNull() & col("dataset").isNotNull())
+        .filter(
+            col("event_ts").isNotNull()
+            & col("event_id").isNotNull()
+            & col("dataset").isNotNull()
+        )
     )
-    assert_no_nulls(transformed_df, ["event_id", "dataset", "event_ts"], "bronze.kafka_batch")
+    assert_no_nulls(
+        transformed_df, ["event_id", "dataset", "event_ts"], "bronze.kafka_batch"
+    )
     return transformed_df
 
 
@@ -105,7 +126,9 @@ def _offsets_path(checkpoint_path: str) -> str:
     return f"{checkpoint_path.rstrip('/')}/offsets.json"
 
 
-def _read_starting_offsets(spark: SparkSession, checkpoint_path: str, default_offsets: str) -> str:
+def _read_starting_offsets(
+    spark: SparkSession, checkpoint_path: str, default_offsets: str
+) -> str:
     """Read the last stored offset checkpoint or fall back to the default."""
 
     offsets_path = _offsets_path(checkpoint_path)
@@ -121,7 +144,9 @@ def _normalize_batch_starting_offsets(offsets: str) -> str:
     return "earliest" if offsets.strip().lower() == "latest" else offsets
 
 
-def _write_next_offsets(spark: SparkSession, checkpoint_path: str, payload: dict[str, dict[str, int]]) -> None:
+def _write_next_offsets(
+    spark: SparkSession, checkpoint_path: str, payload: dict[str, dict[str, int]]
+) -> None:
     """Persist the next Kafka offsets that the next Bronze batch should start from."""
 
     jvm = spark._jvm
@@ -150,7 +175,9 @@ def _collect_next_offsets(raw_df: DataFrame, topic: str) -> dict[str, dict[str, 
 def _empty_event_id_df(spark: SparkSession) -> DataFrame:
     """Create an empty DataFrame with the same schema as the event id lookup."""
 
-    return spark.createDataFrame([], StructType([StructField("event_id", StringType(), True)]))
+    return spark.createDataFrame(
+        [], StructType([StructField("event_id", StringType(), True)])
+    )
 
 
 def _partition_path(base_path: str, row: dict[str, int | str]) -> str:
@@ -165,17 +192,20 @@ def _partition_path(base_path: str, row: dict[str, int | str]) -> str:
     )
 
 
-def _collect_touched_partition_paths(batch_df: DataFrame, bronze_output_path: str) -> list[str]:
+def _collect_touched_partition_paths(
+    batch_df: DataFrame, bronze_output_path: str
+) -> list[str]:
     """Collect all Bronze partition paths touched by this batch."""
 
     rows = [
-        row.asDict()
-        for row in batch_df.select(*PARTITION_COLUMNS).distinct().collect()
+        row.asDict() for row in batch_df.select(*PARTITION_COLUMNS).distinct().collect()
     ]
     return [_partition_path(bronze_output_path, row) for row in rows]
 
 
-def _read_existing_event_ids(spark: SparkSession, bronze_output_path: str, partition_paths: list[str]) -> DataFrame:
+def _read_existing_event_ids(
+    spark: SparkSession, bronze_output_path: str, partition_paths: list[str]
+) -> DataFrame:
     """Read previously-written event ids from only the touched Bronze partitions."""
 
     existing_paths = [path for path in partition_paths if path_exists(spark, path)]
@@ -189,7 +219,9 @@ def _read_existing_event_ids(spark: SparkSession, bronze_output_path: str, parti
     )
 
 
-def prepare_bronze_write_plan(transformed_batch: DataFrame, bronze_output_path: str) -> BronzeWritePlan:
+def prepare_bronze_write_plan(
+    transformed_batch: DataFrame, bronze_output_path: str
+) -> BronzeWritePlan:
     """Plan the Bronze write by filtering duplicates before any append happens."""
 
     spark = transformed_batch.sparkSession
@@ -197,15 +229,24 @@ def prepare_bronze_write_plan(transformed_batch: DataFrame, bronze_output_path: 
     transformed_count = transformed_batch.count()
     incoming_duplicate_count = count_duplicate_keys(transformed_batch, ["event_id"])
     unique_transformed_batch = transformed_batch.dropDuplicates(["event_id"])
-    touched_partition_paths = _collect_touched_partition_paths(unique_transformed_batch, bronze_output_path)
-    existing_event_ids = _read_existing_event_ids(spark, bronze_output_path, touched_partition_paths)
-    write_batch = unique_transformed_batch.join(existing_event_ids, on="event_id", how="left_anti").persist(StorageLevel.MEMORY_AND_DISK)
+    touched_partition_paths = _collect_touched_partition_paths(
+        unique_transformed_batch, bronze_output_path
+    )
+    existing_event_ids = _read_existing_event_ids(
+        spark, bronze_output_path, touched_partition_paths
+    )
+    write_batch = unique_transformed_batch.join(
+        existing_event_ids, on="event_id", how="left_anti"
+    ).persist(StorageLevel.MEMORY_AND_DISK)
     write_count = write_batch.count()
     duplicate_count = transformed_count - write_count
 
     assert_unique_keys(write_batch, ["event_id"], "bronze.write_batch")
     if incoming_duplicate_count:
-        logger.info("Suppressed duplicate event_ids already present in batch duplicate_count=%s", incoming_duplicate_count)
+        logger.info(
+            "Suppressed duplicate event_ids already present in batch duplicate_count=%s",
+            incoming_duplicate_count,
+        )
 
     return BronzeWritePlan(
         write_batch=write_batch,
@@ -232,7 +273,9 @@ def main() -> None:
         stage_table=config.bronze_checkpoint_path,
     )
 
-    starting_offsets = _read_starting_offsets(spark, config.bronze_checkpoint_path, config.kafka_starting_offsets)
+    starting_offsets = _read_starting_offsets(
+        spark, config.bronze_checkpoint_path, config.kafka_starting_offsets
+    )
     raw_batch = (
         spark.read.format("kafka")
         .option("kafka.bootstrap.servers", config.kafka_bootstrap_servers)
@@ -246,13 +289,24 @@ def main() -> None:
     raw_batch = raw_batch.persist(StorageLevel.MEMORY_AND_DISK)
     raw_count = raw_batch.count()
     if raw_count == 0:
-        logger.info("Kafka bronze batch is empty topic=%s starting_offsets=%s", args.topic, starting_offsets)
+        logger.info(
+            "Kafka bronze batch is empty topic=%s starting_offsets=%s",
+            args.topic,
+            starting_offsets,
+        )
         raw_batch.unpersist()
         return
 
-    transformed_batch = transform_kafka_batch(raw_batch).persist(StorageLevel.MEMORY_AND_DISK)
+    transformed_batch = transform_kafka_batch(raw_batch).persist(
+        StorageLevel.MEMORY_AND_DISK
+    )
     if transformed_batch.isEmpty():
-        logger.info("Kafka bronze batch produced no valid transformed rows topic=%s starting_offsets=%s raw_count=%s", args.topic, starting_offsets, raw_count)
+        logger.info(
+            "Kafka bronze batch produced no valid transformed rows topic=%s starting_offsets=%s raw_count=%s",
+            args.topic,
+            starting_offsets,
+            raw_count,
+        )
         transformed_batch.unpersist()
         raw_batch.unpersist()
         return
@@ -261,10 +315,17 @@ def main() -> None:
     try:
         if write_plan.write_count > 0:
             write_plan.write_batch.write.mode("append").partitionBy(
-                "dataset_partition", "event_year", "event_month", "event_day", "event_hour"
+                "dataset_partition",
+                "event_year",
+                "event_month",
+                "event_day",
+                "event_hour",
             ).parquet(config.bronze_output_path)
         else:
-            logger.info("Kafka bronze batch contained only duplicate events topic=%s", args.topic)
+            logger.info(
+                "Kafka bronze batch contained only duplicate events topic=%s",
+                args.topic,
+            )
 
         next_offsets = _collect_next_offsets(raw_batch, args.topic)
         _write_next_offsets(spark, config.bronze_checkpoint_path, next_offsets)

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import pandas as pd
-import psycopg2
-
 import data_access
 import data_access_grid
 import data_access_planning
 import data_access_shared
 import data_access_summary
+import pandas as pd
+import psycopg2
 
 
 class FakeCursor:
@@ -36,7 +35,9 @@ class FakeConnection:
         return None
 
 
-def test_connection_kwargs_use_environment_overrides(monkeypatch) -> None:  # noqa: ANN001
+def test_connection_kwargs_use_environment_overrides(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     monkeypatch.setenv("POSTGRES_HOST", "warehouse")
     monkeypatch.setenv("POSTGRES_PORT", "6543")
     monkeypatch.setenv("POSTGRES_DB", "analytics")
@@ -54,7 +55,9 @@ def test_connection_kwargs_use_environment_overrides(monkeypatch) -> None:  # no
     }
 
 
-def test_get_connection_and_safe_read_sql_delegate_to_database(monkeypatch) -> None:  # noqa: ANN001
+def test_get_connection_and_safe_read_sql_delegate_to_database(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     captured: dict[str, object] = {}
     fake_connection = FakeConnection(FakeCursor((True,)))
 
@@ -82,10 +85,14 @@ def test_get_connection_and_safe_read_sql_delegate_to_database(monkeypatch) -> N
     assert df.iloc[0]["value"] == 1
 
 
-def test_table_has_rows_handles_success_and_database_error(monkeypatch) -> None:  # noqa: ANN001
+def test_table_has_rows_handles_success_and_database_error(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     data_access_summary.table_has_rows.clear()
     cursor = FakeCursor((True,))
-    monkeypatch.setattr(data_access_summary, "get_connection", lambda: FakeConnection(cursor))
+    monkeypatch.setattr(
+        data_access_summary, "get_connection", lambda: FakeConnection(cursor)
+    )
 
     assert data_access_summary.table_has_rows("platinum.region_demand_daily") is True
     assert "select exists" in cursor.executed[0].lower()
@@ -99,7 +106,9 @@ def test_table_has_rows_handles_success_and_database_error(monkeypatch) -> None:
     assert data_access_summary.table_has_rows("platinum.region_demand_daily") is False
 
 
-def test_summary_queries_and_respondent_listing_use_safe_read_sql(monkeypatch) -> None:  # noqa: ANN001
+def test_summary_queries_and_respondent_listing_use_safe_read_sql(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     calls: list[dict[str, object]] = []
     for func in (
         data_access_summary.get_summary_coverage,
@@ -115,7 +124,9 @@ def test_summary_queries_and_respondent_listing_use_safe_read_sql(monkeypatch) -
         if "select distinct respondent" in query:
             return pd.DataFrame({"respondent": ["MISO", None, "PJM"]})
         if "ops.backfill_job_summary" in query:
-            return pd.DataFrame([{"dataset_id": "electricity_region_data", "status": "pending"}])
+            return pd.DataFrame(
+                [{"dataset_id": "electricity_region_data", "status": "pending"}]
+            )
         return pd.DataFrame(
             [
                 {
@@ -139,7 +150,9 @@ def test_summary_queries_and_respondent_listing_use_safe_read_sql(monkeypatch) -
     assert any("ops.backfill_job_summary" in call["query"] for call in calls)
 
 
-def test_grid_and_planning_queries_apply_all_filters(monkeypatch) -> None:  # noqa: ANN001
+def test_grid_and_planning_queries_apply_all_filters(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     calls: list[dict[str, object]] = []
     for func in (
         data_access_grid.load_grid_operations_alerts,
@@ -158,11 +171,21 @@ def test_grid_and_planning_queries_apply_all_filters(monkeypatch) -> None:  # no
     monkeypatch.setattr(data_access_grid, "_safe_read_sql", fake_read_sql)
     monkeypatch.setattr(data_access_planning, "_safe_read_sql", fake_read_sql)
 
-    data_access_grid.load_grid_operations_alerts("2026-03-10T00:00:00+00:00", "2026-03-10T12:00:00+00:00", ["PJM"])
-    data_access_grid.load_latest_grid_operations_snapshot("2026-03-10T00:00:00+00:00", "2026-03-10T12:00:00+00:00", ["PJM"])
-    data_access_grid.load_latest_grid_alerts("2026-03-10T00:00:00+00:00", "2026-03-10T12:00:00+00:00", ["PJM"])
-    data_access_grid.load_grid_watchlist("2026-03-10T00:00:00+00:00", "2026-03-10T12:00:00+00:00", ["PJM"])
-    data_access_planning.load_resource_planning_daily("2026-03-01", "2026-03-10", ["PJM"])
+    data_access_grid.load_grid_operations_alerts(
+        "2026-03-10T00:00:00+00:00", "2026-03-10T12:00:00+00:00", ["PJM"]
+    )
+    data_access_grid.load_latest_grid_operations_snapshot(
+        "2026-03-10T00:00:00+00:00", "2026-03-10T12:00:00+00:00", ["PJM"]
+    )
+    data_access_grid.load_latest_grid_alerts(
+        "2026-03-10T00:00:00+00:00", "2026-03-10T12:00:00+00:00", ["PJM"]
+    )
+    data_access_grid.load_grid_watchlist(
+        "2026-03-10T00:00:00+00:00", "2026-03-10T12:00:00+00:00", ["PJM"]
+    )
+    data_access_planning.load_resource_planning_daily(
+        "2026-03-01", "2026-03-10", ["PJM"]
+    )
     data_access_planning.load_planning_watchlist("2026-03-01", "2026-03-10", ["PJM"])
 
     assert "period desc" in calls[0]["query"]
@@ -184,6 +207,9 @@ def test_grid_and_planning_queries_apply_all_filters(monkeypatch) -> None:  # no
 
 def test_data_access_wrapper_reexports_split_modules() -> None:
     assert data_access.load_grid_watchlist is data_access_grid.load_grid_watchlist
-    assert data_access.load_latest_planning_snapshot is data_access_planning.load_latest_planning_snapshot
+    assert (
+        data_access.load_latest_planning_snapshot
+        is data_access_planning.load_latest_planning_snapshot
+    )
     assert data_access.get_connection is data_access_shared.get_connection
     assert data_access.get_summary_coverage is data_access_summary.get_summary_coverage

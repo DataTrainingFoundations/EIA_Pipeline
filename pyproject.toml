@@ -1,0 +1,29 @@
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+extend-exclude = '''
+(
+  ^/admin_app
+  | ^/docs
+  | ^/htmlcov
+  | ^/presentation
+  | ^/tmp_spark_write_test
+)
+'''
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+exclude = [
+    ".git",
+    ".pytest_cache",
+    "admin_app",
+    "docs",
+    "htmlcov",
+    "presentation",
+    "tmp_spark_write_test",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+ignore = ["E501"]

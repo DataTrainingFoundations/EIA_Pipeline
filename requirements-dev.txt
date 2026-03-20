@@ -1,2 +1,5 @@
+black
 pytest
 pytest-cov
+pytest-html
+ruff

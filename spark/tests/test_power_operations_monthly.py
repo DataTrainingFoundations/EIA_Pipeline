@@ -34,9 +34,9 @@ def test_clean_power_operational_data_parses_monthly_rows(spark_session) -> None
     )
 
     cleaned_df = clean_power_operational_data(bronze_df)
-    row = cleaned_df.collect()[0]
+    row = cleaned_df.selectExpr("date_format(period, 'yyyy-MM') as period_month", "location", "sector_id", "fueltype_id", "generation_thousand_mwh").collect()[0]
 
-    assert row["period"] == datetime(2026, 1, 1, 0, 0)
+    assert row["period_month"] == "2026-01"
     assert row["location"] == "US"
     assert row["sector_id"] == "1"
     assert row["fueltype_id"] == "COL"

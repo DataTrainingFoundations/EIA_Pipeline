@@ -1,7 +1,17 @@
+import os
 import sys
 from pathlib import Path
+import gc
 
 import pytest
+
+# Use the PySpark distribution installed in this Python environment for tests.
+# An externally configured SPARK_HOME can point at a different Spark version
+# and break local session startup.
+os.environ.pop("SPARK_HOME", None)
+os.environ["PYSPARK_PYTHON"] = sys.executable
+os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
+
 from pyspark.sql import SparkSession
 
 
@@ -12,16 +22,16 @@ if str(SPARK_ROOT) not in sys.path:
 
 @pytest.fixture(scope="session")
 def spark_session() -> SparkSession:
-    try:
-        spark = (
-            SparkSession.builder.master("local[1]")
-            .appName("spark-tests")
-            .config("spark.ui.enabled", "false")
-            .config("spark.sql.session.timeZone", "UTC")
-            .getOrCreate()
-        )
-    except Exception as exc:  # pragma: no cover - environment-specific
-        pytest.skip(f"Local Spark session unavailable in this environment: {exc}")
+    spark = (
+        SparkSession.builder.master("local[1]")
+        .appName("spark-tests")
+        .config("spark.ui.enabled", "false")
+        .config("spark.sql.session.timeZone", "UTC")
+        .config("spark.sql.shuffle.partitions", "1")
+        .config("spark.default.parallelism", "1")
+        .getOrCreate()
+    )
 
     yield spark
     spark.stop()
+    gc.collect()

@@ -1,20 +1,18 @@
 # Testing State
 
-This document describes the current testing posture of the repo as it exists today. It separates what is actually present from what still needs to be added before the test strategy can be called mature.
+This document captures the current repo testing posture after the March 19, 2026 testing hardening pass.
 
 ## Short Answer
 
-The project has meaningful automated testing, and it is not limited to unit tests.
+The repo now has a stable default local test workflow with:
 
-Current state:
+- `pytest` as the main test runner
+- automated suites for `ingestion`, `airflow`, `app`, `admin_app`, and `spark`
+- `0` failures, `0` skips, and `0` warning summaries on the canonical report run
+- an enforced total coverage gate of `70%`
+- ready-to-open HTML artifacts for both coverage and the full pytest execution report
 
-- `pytest` is the main automated test runner
-- the repo has test suites for `ingestion`, `airflow`, `app`, `admin_app`, and `spark`
-- there are also script-driven end-to-end and historical backfill checks in `scripts/`
-- the repo now has repeatable coverage tooling through `pytest.ini`, `.coveragerc`, `requirements-dev.txt`, and `scripts/run_tests.*`
-- there is still no enforced minimum coverage threshold
-
-## How To Run It
+## Canonical Commands
 
 Install shared test tooling:
 
@@ -24,181 +22,79 @@ Run the full suite:
 
 `pytest -q`
 
-Run coverage:
+Run the release-style report gate:
 
 `powershell -ExecutionPolicy Bypass -File scripts/run_tests.ps1 -Mode coverage`
 
-HTML coverage report:
+Generated artifacts:
 
-`htmlcov/index.html`
+- coverage HTML: `htmlcov/index.html`
+- pytest HTML: `test-results/pytest-report.html`
+- JUnit XML: `test-results/junit.xml`
 
-## Current Coverage Snapshot
+## Current Measured State
 
-Coverage should be discussed in two ways:
-
-- measured code coverage
-- practical test surface coverage
-
-### Measured Code Coverage
-
-On March 19, 2026, the command below was run successfully:
+On March 19, 2026, the command below ran successfully on this Windows workspace:
 
 `powershell -ExecutionPolicy Bypass -File scripts/run_tests.ps1 -Mode coverage`
 
 Result:
 
-- `79` passed
-- `26` skipped
-- overall measured coverage: `58.2%`
-- branch coverage was enabled for the run
-- HTML report was written to `htmlcov/index.html`
+- `146` passed
+- `0` skipped
+- `0` warning summaries
+- overall measured coverage: `72.3%`
+- branch coverage was enabled
+- enforced total coverage gate: `70%`
 
 Measured breakdown by area:
 
 | Area | Coverage |
 | --- | ---: |
-| `ingestion/src` | `85.8%` |
-| `airflow/dags` | `56.9%` |
-| `app` | `74.9%` |
-| `admin_app` | `66.2%` |
-| `spark/common` + `spark/jobs` | `36.5%` |
+| `ingestion/src` | `85.6%` |
+| `airflow/dags` | `68.1%` |
+| `app` | `75.2%` |
+| `admin_app` | `75.7%` |
+| `spark/common` + `spark/jobs` | `60.2%` |
 
-Important caveat:
+## What Changed In Practice
 
-- most skipped tests were Spark tests that require a local Spark session
-- in this environment, Spark session startup failed with a Py4J constructor error, so many data-frame-heavy tests were skipped
-- one Airflow test module was skipped because the local Python environment did not have the `airflow` package installed
-- because of that, the `58.2%` number is a real baseline, but it is still conservative for Spark-heavy logic
+- the Airflow factory test no longer skips when `apache-airflow` is not installed locally
+- the Spark tests no longer skip on Windows because they no longer depend on local Hadoop parquet writes for the affected cases
+- coverage mode now produces both coverage HTML and a full pytest HTML report
+- coverage mode now fails if JUnit reports any failures, errors, or skips
+- warnings are treated as test failures in the main pytest configuration
+- the local report run is now self-sufficient in this environment and does not depend on installing Airflow or Windows Hadoop tooling
 
-### Practical Test Surface Coverage
+## Practical Test Surface
 
-By static count, the repo currently contains:
+The repo now has broader direct regression coverage in the highest-risk areas:
 
-- `29` test files
-- `105` named test functions
+- Airflow validation helpers
+- Airflow bronze repair queue helpers
+- admin comparison key-building helpers
+- parquet discovery and query helpers
+- Spark duplicate suppression, merge, and transform helpers
+- Spark Bronze verification and monthly power transforms
 
-Breakdown by area:
+## What This Means
 
-- `ingestion/tests`: `3` files, `19` tests
-- `airflow/tests`: `6` files, `16` tests
-- `app/tests`: `4` files, `15` tests
-- `admin_app/tests`: `5` files, `17` tests
-- `spark/tests`: `11` files, `38` tests
+The testing posture is now materially stronger than the previous baseline.
 
-That means the repo has broad automated test surface even though full measured execution coverage is lower than we would want.
+Current strengths:
 
-## Types Of Testing Present In The Repo
+- stable default local execution with no skips
+- enforced minimum coverage threshold
+- HTML artifacts suitable for review and handoff
+- stronger regression protection around orchestration helpers and Spark data-shape logic
 
-### 1. Unit Tests
+Current remaining gaps:
 
-These exist across all major areas and focus on pure functions, argument parsing, validation helpers, query helpers, and transform logic.
-
-Examples:
-
-- ingestion window-boundary and event-building logic
-- Airflow helper functions for backfill, validation, and runtime helpers
-- app data-access and page-logic helpers
-- Spark quality helpers and transformation functions
-
-### 2. Component Or Integration-Style Tests
-
-These tests exercise a larger slice of behavior than a pure unit test, but usually with mocks, fixtures, or local Spark sessions instead of a full running platform.
-
-Examples:
-
-- DAG construction and task wiring tests in `airflow/tests`
-- CLI entrypoint tests in `ingestion/tests` and `spark/tests`
-- Spark transformation tests that run against a local Spark session
-- app query-layer tests that validate filtering and error handling behavior
-
-This is important because many of the current tests are more valuable than shallow unit tests. They validate orchestration wiring, data-shape assumptions, and CLI behavior.
-
-### 3. Scripted End-To-End Or Smoke Testing
-
-The repo also contains shell and PowerShell scripts that exercise a running environment:
-
-- `scripts/run_e2e.sh`
-- `scripts/run_e2e.ps1`
-- `scripts/run_historical.sh`
-- `scripts/run_historical.ps1`
-
-These are not the same thing as a full environment integration suite inside `pytest`, but they do provide repeatable environment-level validation paths.
-
-### 4. What Is Not Clearly Present
-
-The following test layers were not found as first-class, repo-owned practices:
-
-- browser or UI automation such as Playwright or Cypress
-- load or performance testing
-- security testing
-- contract testing between services
-- chaos or resilience testing
-- enforced coverage gates in local scripts or CI-style config
-
-## What Meaningful Coverage Should Mean Here
-
-Meaningful coverage is not the same thing as maximizing a percentage.
-
-In this codebase, meaningful coverage should prove that the highest-risk pipeline behaviors are protected:
-
-- ingestion windows are translated correctly at API boundaries
-- deterministic `event_id` creation remains stable
-- Bronze replay and deduplication logic stays safe
-- Silver and Gold transforms preserve business-key semantics
-- Airflow backfill queue state transitions stay correct
-- DAG wiring still launches the right steps in the right order
-- validation checks fail when row counts, distinct counts, or numeric bounds are wrong
-- serving-layer queries still support the business app correctly
-
-If those areas are covered, a lower numeric percentage can still be more useful than a higher percentage built from shallow tests.
-
-## Current Strengths
-
-- all major subsystems have automated tests
-- ingestion has strong measured coverage
-- Spark transformation logic has meaningful test depth
-- Airflow DAG builders and queue helpers are tested directly
-- ingestion edge cases such as windowing and validation are tested
-- app query and page-support logic has targeted regression coverage
-- the repo includes repeatable smoke and historical scripts, not only local one-off commands
-
-## Current Gaps
-
-- no enforced minimum coverage threshold
-- no explicit branch coverage target by subsystem
-- no visible automated UI test layer
-- local environment issues currently suppress a large block of Spark execution tests
-- one Airflow test currently depends on the `airflow` package being available locally
-- limited proof of full environment integration beyond scripts
-- no visible performance or security validation layer
-
-## Practical Assessment
-
-The current testing posture is better than "just unit tests" but weaker than a fully mature test strategy.
-
-The repo is strongest at:
-
-- logic-level regression protection
-- data transformation correctness
-- DAG and helper wiring validation
-
-The repo is weaker at:
-
-- measured quality targets
-- full-system automation
-- non-functional testing
-
-## If We Want To Improve Testing Next
-
-The next useful upgrades would be:
-
-- stabilize local Spark test execution so the skipped Spark suite can run everywhere
-- install or containerize a local Airflow test environment so the skipped factory test always executes
-- define a minimum coverage threshold for critical modules
-- convert the smoke scripts into more repeatable integration checks where practical
-- add at least one browser-level test pass for the Streamlit surfaces
-- add a small number of environment-level tests for the Kafka -> Bronze -> Silver -> Gold -> Platinum handoff
+- no browser or UI automation layer
+- no performance or load testing
+- no dedicated contract or security testing layer
+- several thin Streamlit/bootstrap entrypoints still contribute low or zero coverage and remain good future candidates for targeted tests
 
 ## Bottom Line
 
-The project has real testing across multiple layers and now has a repeatable measured coverage workflow. What it still lacks is a disciplined coverage target, stable execution of all environment-dependent tests, and a clearly agreed definition of what "enough coverage" means for release confidence.
+The repo now has a disciplined local testing gate instead of a best-effort one. The default report run is repeatable, zero-skip in this environment, produces openable HTML artifacts, and clears an enforced `70%` total coverage bar.

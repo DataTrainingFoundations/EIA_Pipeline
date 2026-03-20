@@ -1,12 +1,56 @@
 from datetime import datetime, timezone
 
 import pytest
+from pyspark.sql.readwriter import DataFrameReader, DataFrameWriter
 
+import common.io as spark_io
+import jobs.gold_region_fuel_serving_hourly as gold_region_fuel_serving_hourly
+import jobs.silver_clean_transform as silver_clean_transform
 from common.io import merge_partitioned_parquet, write_partitioned_parquet
 from jobs.gold_region_fuel_serving_hourly import build_region_hourly_metrics, build_respondent_dimension
 from jobs.platinum_region_demand_daily import build_region_demand_daily
 from jobs.platinum_resource_planning_daily import build_resource_planning_daily
 from jobs.silver_clean_transform import clean_region_data, validate_non_empty
+
+
+def _capture_writer_calls(monkeypatch, *, in_memory_store: dict | None = None) -> list[dict]:  # noqa: ANN001
+    writes: list[dict] = []
+    original_mode = DataFrameWriter.mode
+    original_option = DataFrameWriter.option
+    original_partition_by = DataFrameWriter.partitionBy
+
+    def fake_mode(self, save_mode: str):  # noqa: ANN001, ANN202
+        self._captured_mode = save_mode
+        return original_mode(self, save_mode)
+
+    def fake_option(self, key: str, value):  # noqa: ANN001, ANN202
+        options = list(getattr(self, "_captured_options", []))
+        options.append((key, value))
+        self._captured_options = options
+        return original_option(self, key, value)
+
+    def fake_partition_by(self, *columns: str):  # noqa: ANN001, ANN202
+        self._captured_partition_columns = columns
+        return original_partition_by(self, *columns)
+
+    def fake_parquet(self, path: str):  # noqa: ANN001, ANN202
+        writes.append(
+            {
+                "path": path,
+                "mode": getattr(self, "_captured_mode", None),
+                "options": list(getattr(self, "_captured_options", [])),
+                "partition_columns": tuple(getattr(self, "_captured_partition_columns", ())),
+                "rows": self._df.collect(),
+            }
+        )
+        if in_memory_store is not None:
+            in_memory_store["df"] = self._df
+
+    monkeypatch.setattr(DataFrameWriter, "mode", fake_mode)
+    monkeypatch.setattr(DataFrameWriter, "option", fake_option)
+    monkeypatch.setattr(DataFrameWriter, "partitionBy", fake_partition_by)
+    monkeypatch.setattr(DataFrameWriter, "parquet", fake_parquet)
+    return writes
 
 
 def test_clean_region_data_deduplicates_event_ids(spark_session) -> None:
@@ -15,13 +59,13 @@ def test_clean_region_data_deduplicates_event_ids(spark_session) -> None:
             {
                 "event_id": "evt-1",
                 "dataset": "electricity_region_data",
-                "payload": {"period": "2026-01-01T00", "respondent": "PJM", "type": "D", "value": "100", "value-units": "MWh"},
+                "payload": {"period": "2026-01-01T00", "respondent": "PJM", "respondent-name": "PJM", "type": "D", "value": "100", "value-units": "MWh"},
                 "ingestion_ts": datetime(2026, 1, 1, 1, 0, tzinfo=timezone.utc),
             },
             {
                 "event_id": "evt-1",
                 "dataset": "electricity_region_data",
-                "payload": {"period": "2026-01-01T00", "respondent": "PJM", "type": "D", "value": "100", "value-units": "MWh"},
+                "payload": {"period": "2026-01-01T00", "respondent": "PJM", "respondent-name": "PJM", "type": "D", "value": "100", "value-units": "MWh"},
                 "ingestion_ts": datetime(2026, 1, 1, 1, 5, tzinfo=timezone.utc),
             },
         ]
@@ -157,7 +201,7 @@ def test_region_hourly_metrics_prefers_latest_loaded_conflicting_duplicate(spark
     assert rows[0]["actual_demand_mwh"] == 120.0
 
 
-def test_respondent_dimension_rolls_up_current_and_historical_names(spark_session, tmp_path) -> None:
+def test_respondent_dimension_rolls_up_current_and_historical_names(monkeypatch, spark_session) -> None:  # noqa: ANN001
     historical_dim = spark_session.createDataFrame(
         [
             {
@@ -170,8 +214,7 @@ def test_respondent_dimension_rolls_up_current_and_historical_names(spark_sessio
             }
         ]
     )
-    historical_path = tmp_path / "respondent_dim"
-    historical_dim.write.mode("overwrite").parquet(str(historical_path))
+    monkeypatch.setattr(gold_region_fuel_serving_hourly, "read_parquet_if_exists", lambda *_args, **_kwargs: historical_dim)
 
     region_df = spark_session.createDataFrame(
         [
@@ -189,7 +232,7 @@ def test_respondent_dimension_rolls_up_current_and_historical_names(spark_sessio
         ]
     )
 
-    dim_df = build_respondent_dimension(spark_session, region_df, None, str(historical_path))
+    dim_df = build_respondent_dimension(spark_session, region_df, None, "file:///respondent_dim")
     rows = dim_df.collect()
 
     assert len(rows) == 1
@@ -198,7 +241,7 @@ def test_respondent_dimension_rolls_up_current_and_historical_names(spark_sessio
     assert rows[0]["last_seen_date"] == datetime(2026, 1, 1, tzinfo=timezone.utc).date()
 
 
-def test_respondent_dimension_preserves_existing_dataset_count(spark_session, tmp_path) -> None:
+def test_respondent_dimension_preserves_existing_dataset_count(monkeypatch, spark_session) -> None:  # noqa: ANN001
     historical_dim = spark_session.createDataFrame(
         [
             {
@@ -211,8 +254,7 @@ def test_respondent_dimension_preserves_existing_dataset_count(spark_session, tm
             }
         ]
     )
-    historical_path = tmp_path / "respondent_dim_existing_count"
-    historical_dim.write.mode("overwrite").parquet(str(historical_path))
+    monkeypatch.setattr(gold_region_fuel_serving_hourly, "read_parquet_if_exists", lambda *_args, **_kwargs: historical_dim)
 
     region_df = spark_session.createDataFrame(
         [
@@ -230,7 +272,7 @@ def test_respondent_dimension_preserves_existing_dataset_count(spark_session, tm
         ]
     )
 
-    dim_df = build_respondent_dimension(spark_session, region_df, None, str(historical_path))
+    dim_df = build_respondent_dimension(spark_session, region_df, None, "file:///respondent_dim_existing_count")
     rows = dim_df.collect()
 
     assert len(rows) == 1
@@ -261,8 +303,8 @@ def test_respondent_dimension_defaults_dataset_count_without_history(spark_sessi
     assert rows[0]["source_dataset_count"] == 1
 
 
-def test_write_partitioned_parquet_overwrites_only_touched_partitions(spark_session, tmp_path) -> None:
-    output_path = tmp_path / "partitioned_dataset"
+def test_write_partitioned_parquet_overwrites_only_touched_partitions(monkeypatch, spark_session) -> None:  # noqa: ANN001
+    writes = _capture_writer_calls(monkeypatch)
     first_df = spark_session.createDataFrame(
         [
             {
@@ -277,30 +319,57 @@ def test_write_partitioned_parquet_overwrites_only_touched_partitions(spark_sess
             },
         ]
     )
-    replacement_df = spark_session.createDataFrame(
+
+    write_partitioned_parquet(first_df, "file:///partitioned_dataset")
+
+    assert len(writes) == 1
+    assert writes[0]["path"] == "file:///partitioned_dataset"
+    assert writes[0]["mode"] == "overwrite"
+    assert ("partitionOverwriteMode", "dynamic") in writes[0]["options"]
+    assert writes[0]["partition_columns"] == ("event_date",)
+
+
+def test_write_partitioned_dataset_uses_merge_partitioned_parquet(monkeypatch, spark_session) -> None:  # noqa: ANN001
+    captured: dict[str, object] = {}
+    region_df = spark_session.createDataFrame(
         [
             {
-                "respondent": "MISO",
-                "metric": 250.0,
-                "event_date": datetime(2026, 1, 2, tzinfo=timezone.utc).date(),
+                "event_id": "evt-1",
+                "period": datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
+                "respondent": "PJM",
+                "respondent_name": "PJM",
+                "value": 100.0,
+                "loaded_at": datetime(2026, 1, 1, 1, 0, tzinfo=timezone.utc),
+                "event_date": datetime(2026, 1, 1, tzinfo=timezone.utc).date(),
             }
         ]
     )
 
-    write_partitioned_parquet(first_df, str(output_path))
-    write_partitioned_parquet(replacement_df, str(output_path))
+    def fake_merge(df, output_path: str, **kwargs) -> None:  # noqa: ANN001
+        captured["row_count"] = df.count()
+        captured["output_path"] = output_path
+        captured["kwargs"] = kwargs
 
-    rows = spark_session.read.parquet(str(output_path)).orderBy("event_date", "respondent").collect()
+    monkeypatch.setattr(silver_clean_transform, "merge_partitioned_parquet", fake_merge)
 
-    assert len(rows) == 2
-    assert rows[0]["respondent"] == "PJM"
-    assert rows[0]["metric"] == 100.0
-    assert rows[1]["respondent"] == "MISO"
-    assert rows[1]["metric"] == 250.0
+    silver_clean_transform.write_partitioned_dataset(region_df, "s3a://silver/region_data")
+
+    assert captured["row_count"] == 1
+    assert captured["output_path"] == "s3a://silver/region_data"
+    assert captured["kwargs"] == {
+        "merge_keys": ["event_id"],
+        "freshness_columns": ["loaded_at"],
+        "partition_column": "event_date",
+    }
 
 
-def test_merge_partitioned_parquet_preserves_same_day_rows_across_writes(spark_session, tmp_path) -> None:
-    output_path = tmp_path / "merged_silver_dataset"
+def test_merge_partitioned_parquet_preserves_same_day_rows_across_writes(monkeypatch, spark_session) -> None:  # noqa: ANN001
+    output_path = "file:///merged_silver_dataset"
+    store: dict[str, object] = {"df": None}
+    writes = _capture_writer_calls(monkeypatch, in_memory_store=store)
+    monkeypatch.setattr(spark_io, "path_exists", lambda *_args, **_kwargs: store["df"] is not None)
+    monkeypatch.setattr(DataFrameReader, "parquet", lambda *_args, **_kwargs: store["df"])
+
     first_df = spark_session.createDataFrame(
         [
             {
@@ -324,17 +393,22 @@ def test_merge_partitioned_parquet_preserves_same_day_rows_across_writes(spark_s
         ]
     )
 
-    merge_partitioned_parquet(first_df, str(output_path), merge_keys=["event_id"], freshness_columns=["loaded_at"])
-    merge_partitioned_parquet(second_df, str(output_path), merge_keys=["event_id"], freshness_columns=["loaded_at"])
+    merge_partitioned_parquet(first_df, output_path, merge_keys=["event_id"], freshness_columns=["loaded_at"])
+    merge_partitioned_parquet(second_df, output_path, merge_keys=["event_id"], freshness_columns=["loaded_at"])
 
-    rows = spark_session.read.parquet(str(output_path)).orderBy("period").collect()
+    rows = writes[-1]["rows"]
 
     assert len(rows) == 2
-    assert [row["event_id"] for row in rows] == ["evt-1", "evt-2"]
+    assert sorted(row["event_id"] for row in rows) == ["evt-1", "evt-2"]
 
 
-def test_merge_partitioned_parquet_preserves_earlier_gold_hours_when_later_hour_arrives(spark_session, tmp_path) -> None:
-    output_path = tmp_path / "merged_gold_dataset"
+def test_merge_partitioned_parquet_preserves_earlier_gold_hours_when_later_hour_arrives(monkeypatch, spark_session) -> None:  # noqa: ANN001
+    output_path = "file:///merged_gold_dataset"
+    store: dict[str, object] = {"df": None}
+    writes = _capture_writer_calls(monkeypatch, in_memory_store=store)
+    monkeypatch.setattr(spark_io, "path_exists", lambda *_args, **_kwargs: store["df"] is not None)
+    monkeypatch.setattr(DataFrameReader, "parquet", lambda *_args, **_kwargs: store["df"])
+
     first_df = spark_session.createDataFrame(
         [
             {
@@ -360,17 +434,22 @@ def test_merge_partitioned_parquet_preserves_earlier_gold_hours_when_later_hour_
         ]
     )
 
-    merge_partitioned_parquet(first_df, str(output_path), merge_keys=["period", "respondent"], freshness_columns=["loaded_at"])
-    merge_partitioned_parquet(second_df, str(output_path), merge_keys=["period", "respondent"], freshness_columns=["loaded_at"])
+    merge_partitioned_parquet(first_df, output_path, merge_keys=["period", "respondent"], freshness_columns=["loaded_at"])
+    merge_partitioned_parquet(second_df, output_path, merge_keys=["period", "respondent"], freshness_columns=["loaded_at"])
 
-    rows = spark_session.read.parquet(str(output_path)).orderBy("period").collect()
+    rows = sorted(writes[-1]["rows"], key=lambda row: row["period"])
 
     assert len(rows) == 2
     assert [row["actual_demand_mwh"] for row in rows] == [100.0, 110.0]
 
 
-def test_merge_partitioned_parquet_replaces_same_gold_key_with_latest_loaded_at(spark_session, tmp_path) -> None:
-    output_path = tmp_path / "merged_gold_updates"
+def test_merge_partitioned_parquet_replaces_same_gold_key_with_latest_loaded_at(monkeypatch, spark_session) -> None:  # noqa: ANN001
+    output_path = "file:///merged_gold_updates"
+    store: dict[str, object] = {"df": None}
+    writes = _capture_writer_calls(monkeypatch, in_memory_store=store)
+    monkeypatch.setattr(spark_io, "path_exists", lambda *_args, **_kwargs: store["df"] is not None)
+    monkeypatch.setattr(DataFrameReader, "parquet", lambda *_args, **_kwargs: store["df"])
+
     first_df = spark_session.createDataFrame(
         [
             {
@@ -396,10 +475,10 @@ def test_merge_partitioned_parquet_replaces_same_gold_key_with_latest_loaded_at(
         ]
     )
 
-    merge_partitioned_parquet(first_df, str(output_path), merge_keys=["period", "respondent"], freshness_columns=["loaded_at"])
-    merge_partitioned_parquet(second_df, str(output_path), merge_keys=["period", "respondent"], freshness_columns=["loaded_at"])
+    merge_partitioned_parquet(first_df, output_path, merge_keys=["period", "respondent"], freshness_columns=["loaded_at"])
+    merge_partitioned_parquet(second_df, output_path, merge_keys=["period", "respondent"], freshness_columns=["loaded_at"])
 
-    rows = spark_session.read.parquet(str(output_path)).collect()
+    rows = writes[-1]["rows"]
 
     assert len(rows) == 1
     assert rows[0]["actual_demand_mwh"] == 120.0

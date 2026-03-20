@@ -6,12 +6,19 @@ from typing import Any
 
 import pandas as pd
 import streamlit as st
-
-from data_access_shared import GRID_OPERATIONS_ALERT_TABLE, GRID_OPERATIONS_TABLE, _safe_read_sql
+from data_access_shared import (
+    GRID_OPERATIONS_ALERT_TABLE,
+    GRID_OPERATIONS_TABLE,
+    _safe_read_sql,
+)
 
 
 @st.cache_data(ttl=60)
-def load_grid_operations_hourly(start_ts: str | None = None, end_ts: str | None = None, respondents: list[str] | None = None) -> pd.DataFrame:
+def load_grid_operations_hourly(
+    start_ts: str | None = None,
+    end_ts: str | None = None,
+    respondents: list[str] | None = None,
+) -> pd.DataFrame:
     """Load hourly grid-operations rows for the selected time range and respondents."""
 
     query = f"select * from {GRID_OPERATIONS_TABLE} where 1 = 1"
@@ -30,7 +37,11 @@ def load_grid_operations_hourly(start_ts: str | None = None, end_ts: str | None 
 
 
 @st.cache_data(ttl=60)
-def load_grid_operations_alerts(start_ts: str | None = None, end_ts: str | None = None, respondents: list[str] | None = None) -> pd.DataFrame:
+def load_grid_operations_alerts(
+    start_ts: str | None = None,
+    end_ts: str | None = None,
+    respondents: list[str] | None = None,
+) -> pd.DataFrame:
     """Load persisted grid-operation alerts for the selected filters."""
 
     query = f"select * from {GRID_OPERATIONS_ALERT_TABLE} where 1 = 1"

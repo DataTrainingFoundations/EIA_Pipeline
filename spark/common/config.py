@@ -25,5 +25,7 @@ def load_spark_app_config() -> SparkAppConfig:
         minio_secret_key=os.getenv("MINIO_ROOT_PASSWORD", "minioadmin123"),
         minio_path_style_access=os.getenv("MINIO_PATH_STYLE_ACCESS", "true"),
         bronze_output_path=os.getenv("BRONZE_OUTPUT_PATH", "s3a://bronze/events"),
-        bronze_checkpoint_path=os.getenv("BRONZE_CHECKPOINT_PATH", "s3a://bronze/checkpoints/default"),
+        bronze_checkpoint_path=os.getenv(
+            "BRONZE_CHECKPOINT_PATH", "s3a://bronze/checkpoints/default"
+        ),
     )

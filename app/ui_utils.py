@@ -9,7 +9,9 @@ import pandas as pd
 DEFAULT_APP_TIMEZONE = os.getenv("APP_TIMEZONE", "America/New_York")
 
 
-def build_default_date_range(min_value: pd.Timestamp, max_value: pd.Timestamp, lookback_days: int) -> tuple:
+def build_default_date_range(
+    min_value: pd.Timestamp, max_value: pd.Timestamp, lookback_days: int
+) -> tuple:
     min_date = pd.to_datetime(min_value).date()
     max_date = pd.to_datetime(max_value).date()
     start_date = max(max_date - timedelta(days=lookback_days), min_date)
@@ -43,7 +45,9 @@ def format_timestamp(value: pd.Timestamp | None, timezone_name: str) -> str:
     timestamp_value = pd.to_datetime(value, utc=True, errors="coerce")
     if pd.isna(timestamp_value):
         return "n/a"
-    return timestamp_value.tz_convert(target_timezone).strftime(f"%Y-%m-%d %H:%M {target_timezone}")
+    return timestamp_value.tz_convert(target_timezone).strftime(
+        f"%Y-%m-%d %H:%M {target_timezone}"
+    )
 
 
 def coerce_numeric(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
@@ -54,7 +58,9 @@ def coerce_numeric(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
     return cleaned_df
 
 
-def latest_non_null_value(df: pd.DataFrame, value_column: str, required_columns: list[str]) -> pd.Timestamp | None:
+def latest_non_null_value(
+    df: pd.DataFrame, value_column: str, required_columns: list[str]
+) -> pd.Timestamp | None:
     valid_df = df.dropna(subset=required_columns, how="all")
     if valid_df.empty:
         return None
@@ -68,7 +74,13 @@ def safe_quantile(series: pd.Series, quantile: float) -> float | None:
     return float(numeric.quantile(quantile))
 
 
-def rank_priority_labels(df: pd.DataFrame, label_column: str, order: list[str]) -> pd.DataFrame:
+def rank_priority_labels(
+    df: pd.DataFrame, label_column: str, order: list[str]
+) -> pd.DataFrame:
     ranked_df = df.copy()
-    ranked_df[label_column] = pd.Categorical(ranked_df[label_column], categories=order, ordered=True)
-    return ranked_df.sort_values([label_column, "respondent"], ascending=[True, True]).reset_index(drop=True)
+    ranked_df[label_column] = pd.Categorical(
+        ranked_df[label_column], categories=order, ordered=True
+    )
+    return ranked_df.sort_values(
+        [label_column, "respondent"], ascending=[True, True]
+    ).reset_index(drop=True)

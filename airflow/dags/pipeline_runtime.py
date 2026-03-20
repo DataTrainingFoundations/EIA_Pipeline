@@ -53,7 +53,9 @@ def get_dataset(dataset_id: str) -> dict[str, Any]:
     registry = load_dataset_registry()
     if dataset_id not in registry:
         available = ", ".join(sorted(registry))
-        raise ValueError(f"Unknown dataset '{dataset_id}'. Available datasets: {available}")
+        raise ValueError(
+            f"Unknown dataset '{dataset_id}'. Available datasets: {available}"
+        )
     return registry[dataset_id]
 
 
@@ -203,11 +205,15 @@ def _advance_step(value: datetime, step: str) -> datetime:
     if step == "hour":
         return value.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
     if step == "day":
-        return value.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        return value.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
+            days=1
+        )
     if step == "month":
         year = value.year + (1 if value.month == 12 else 0)
         month = 1 if value.month == 12 else value.month + 1
-        return value.replace(year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
+        return value.replace(
+            year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0
+        )
     if step == "year":
         try:
             return value.replace(year=value.year + 1)

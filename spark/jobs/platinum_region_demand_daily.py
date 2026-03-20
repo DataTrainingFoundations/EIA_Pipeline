@@ -17,8 +17,12 @@ from common.windowing import filter_time_window
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Curated Gold to Platinum region demand serving table.")
-    parser.add_argument("--gold-input-path", default="s3a://gold/facts/region_demand_forecast_hourly")
+    parser = argparse.ArgumentParser(
+        description="Curated Gold to Platinum region demand serving table."
+    )
+    parser.add_argument(
+        "--gold-input-path", default="s3a://gold/facts/region_demand_forecast_hourly"
+    )
     parser.add_argument("--platinum-table", default="platinum.region_demand_daily")
     parser.add_argument("--stage-table", default="platinum.region_demand_daily_stage")
     parser.add_argument("--start")
@@ -26,7 +30,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_region_demand_daily(gold_df: DataFrame, start: str | None, end: str | None) -> DataFrame:
+def build_region_demand_daily(
+    gold_df: DataFrame, start: str | None, end: str | None
+) -> DataFrame:
     platinum_df = (
         gold_df.filter(F.col("actual_demand_mwh").isNotNull())
         .withColumn("date", F.to_date("period"))
@@ -44,10 +50,19 @@ def build_region_demand_daily(gold_df: DataFrame, start: str | None, end: str | 
     )
     assert_no_nulls(
         platinum_df,
-        ["date", "respondent", "daily_demand_mwh", "avg_hourly_demand_mwh", "peak_hourly_demand_mwh", "loaded_at"],
+        [
+            "date",
+            "respondent",
+            "daily_demand_mwh",
+            "avg_hourly_demand_mwh",
+            "peak_hourly_demand_mwh",
+            "loaded_at",
+        ],
         "platinum.region_demand_daily_stage",
     )
-    assert_unique_keys(platinum_df, ["date", "respondent"], "platinum.region_demand_daily_stage")
+    assert_unique_keys(
+        platinum_df, ["date", "respondent"], "platinum.region_demand_daily_stage"
+    )
     assert_non_negative(
         platinum_df,
         ["daily_demand_mwh", "avg_hourly_demand_mwh", "peak_hourly_demand_mwh"],
@@ -75,7 +90,9 @@ def main() -> None:
     if platinum_df.limit(1).count() == 0:
         return
 
-    platinum_df.write.mode("overwrite").jdbc(jdbc_url, args.stage_table, properties=jdbc_props)
+    platinum_df.write.mode("overwrite").jdbc(
+        jdbc_url, args.stage_table, properties=jdbc_props
+    )
 
 
 if __name__ == "__main__":

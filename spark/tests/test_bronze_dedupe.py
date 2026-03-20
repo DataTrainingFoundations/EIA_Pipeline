@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from pyspark.sql.types import StringType, StructField, StructType
-
 from jobs.bronze_kafka_to_minio import prepare_bronze_write_plan, transform_kafka_batch
+from pyspark.sql.types import StringType, StructField, StructType
 
 
 def test_transform_kafka_batch_preserves_kafka_metadata(spark_session) -> None:
@@ -20,7 +19,11 @@ def test_transform_kafka_batch_preserves_kafka_metadata(spark_session) -> None:
                         "event_timestamp": "2026-01-01T00:00:00+00:00",
                         "ingestion_timestamp": "2026-01-01T00:10:00+00:00",
                         "metadata": {"route": "electricity/rto/region-data"},
-                        "payload": {"period": "2026-01-01T00", "respondent": "PJM", "value": "100"},
+                        "payload": {
+                            "period": "2026-01-01T00",
+                            "respondent": "PJM",
+                            "value": "100",
+                        },
                     }
                 ).encode("utf-8"),
                 "topic": "eia_electricity_region_data",
@@ -40,7 +43,9 @@ def test_transform_kafka_batch_preserves_kafka_metadata(spark_session) -> None:
     assert rows[0]["event_hour"] == 0
 
 
-def test_prepare_bronze_write_plan_filters_existing_and_incoming_duplicates(monkeypatch, spark_session) -> None:  # noqa: ANN001
+def test_prepare_bronze_write_plan_filters_existing_and_incoming_duplicates(
+    monkeypatch, spark_session
+) -> None:  # noqa: ANN001
     transformed_batch = spark_session.createDataFrame(
         [
             {
@@ -50,7 +55,11 @@ def test_prepare_bronze_write_plan_filters_existing_and_incoming_duplicates(monk
                 "event_timestamp": "2026-01-01T00:00:00+00:00",
                 "ingestion_timestamp": "2026-01-01T00:10:00+00:00",
                 "metadata": {"route": "electricity/rto/region-data"},
-                "payload": {"period": "2026-01-01T00", "respondent": "PJM", "value": "100"},
+                "payload": {
+                    "period": "2026-01-01T00",
+                    "respondent": "PJM",
+                    "value": "100",
+                },
                 "raw_json": "{}",
                 "kafka_topic": "eia_electricity_region_data",
                 "kafka_partition": 0,
@@ -73,7 +82,11 @@ def test_prepare_bronze_write_plan_filters_existing_and_incoming_duplicates(monk
                 "event_timestamp": "2026-01-01T00:00:00+00:00",
                 "ingestion_timestamp": "2026-01-01T00:20:00+00:00",
                 "metadata": {"route": "electricity/rto/region-data"},
-                "payload": {"period": "2026-01-01T00", "respondent": "PJM", "value": "101"},
+                "payload": {
+                    "period": "2026-01-01T00",
+                    "respondent": "PJM",
+                    "value": "101",
+                },
                 "raw_json": "{}",
                 "kafka_topic": "eia_electricity_region_data",
                 "kafka_partition": 0,
@@ -96,7 +109,11 @@ def test_prepare_bronze_write_plan_filters_existing_and_incoming_duplicates(monk
                 "event_timestamp": "2026-01-01T00:00:00+00:00",
                 "ingestion_timestamp": "2026-01-01T00:20:00+00:00",
                 "metadata": {"route": "electricity/rto/region-data"},
-                "payload": {"period": "2026-01-01T00", "respondent": "PJM", "value": "101"},
+                "payload": {
+                    "period": "2026-01-01T00",
+                    "respondent": "PJM",
+                    "value": "101",
+                },
                 "raw_json": "{}",
                 "kafka_topic": "eia_electricity_region_data",
                 "kafka_partition": 0,
@@ -119,7 +136,11 @@ def test_prepare_bronze_write_plan_filters_existing_and_incoming_duplicates(monk
                 "event_timestamp": "2026-01-01T01:00:00+00:00",
                 "ingestion_timestamp": "2026-01-01T01:10:00+00:00",
                 "metadata": {"route": "electricity/rto/region-data"},
-                "payload": {"period": "2026-01-01T01", "respondent": "PJM", "value": "102"},
+                "payload": {
+                    "period": "2026-01-01T01",
+                    "respondent": "PJM",
+                    "value": "102",
+                },
                 "raw_json": "{}",
                 "kafka_topic": "eia_electricity_region_data",
                 "kafka_partition": 0,
@@ -148,7 +169,9 @@ def test_prepare_bronze_write_plan_filters_existing_and_incoming_duplicates(monk
     )
 
     plan = prepare_bronze_write_plan(transformed_batch, "file:///bronze")
-    written_event_ids = {row["event_id"] for row in plan.write_batch.select("event_id").collect()}
+    written_event_ids = {
+        row["event_id"] for row in plan.write_batch.select("event_id").collect()
+    }
 
     assert plan.transformed_count == 4
     assert plan.duplicate_count == 2
@@ -157,7 +180,9 @@ def test_prepare_bronze_write_plan_filters_existing_and_incoming_duplicates(monk
     assert written_event_ids == {"evt-2", "evt-3"}
 
 
-def test_prepare_bronze_write_plan_advances_duplicate_only_batches(monkeypatch, spark_session) -> None:  # noqa: ANN001
+def test_prepare_bronze_write_plan_advances_duplicate_only_batches(
+    monkeypatch, spark_session
+) -> None:  # noqa: ANN001
     existing_df = spark_session.createDataFrame(
         [
             {
@@ -167,7 +192,11 @@ def test_prepare_bronze_write_plan_advances_duplicate_only_batches(monkeypatch, 
                 "event_timestamp": "2026-01-01T00:00:00+00:00",
                 "ingestion_timestamp": "2026-01-01T00:10:00+00:00",
                 "metadata": {"route": "electricity/rto/region-data"},
-                "payload": {"period": "2026-01-01T00", "respondent": "PJM", "value": "100"},
+                "payload": {
+                    "period": "2026-01-01T00",
+                    "respondent": "PJM",
+                    "value": "100",
+                },
                 "raw_json": "{}",
                 "kafka_topic": "eia_electricity_region_data",
                 "kafka_partition": 0,

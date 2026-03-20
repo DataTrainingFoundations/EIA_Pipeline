@@ -8,7 +8,9 @@ import pipeline_repair
 
 
 class FakeCursor:
-    def __init__(self, *, fetchone_values=None, fetchall_values=None, rowcount: int = 0) -> None:
+    def __init__(
+        self, *, fetchone_values=None, fetchall_values=None, rowcount: int = 0
+    ) -> None:
         self.fetchone_values = list(fetchone_values or [])
         self.fetchall_values = list(fetchall_values or [])
         self.rowcount = rowcount
@@ -69,22 +71,33 @@ def test_load_existing_repair_jobs_normalizes_timezones() -> None:
     }
 
 
-def test_recover_stale_bronze_repair_jobs_returns_rowcount(monkeypatch) -> None:  # noqa: ANN001
+def test_recover_stale_bronze_repair_jobs_returns_rowcount(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     cursor = FakeCursor(rowcount=2)
     conn = FakeConnection(cursor)
     monkeypatch.setattr(pipeline_repair, "db_connect", lambda: conn)
 
-    recovered = pipeline_repair.recover_stale_bronze_repair_jobs("electricity_region_data")
+    recovered = pipeline_repair.recover_stale_bronze_repair_jobs(
+        "electricity_region_data"
+    )
 
     assert recovered == 2
     assert conn.committed is True
 
 
 def test_enqueue_bronze_repair_jobs_returns_zero_when_statuses_are_empty() -> None:
-    assert pipeline_repair.enqueue_bronze_repair_jobs("electricity_region_data", statuses=()) == 0
+    assert (
+        pipeline_repair.enqueue_bronze_repair_jobs(
+            "electricity_region_data", statuses=()
+        )
+        == 0
+    )
 
 
-def test_enqueue_bronze_repair_jobs_respects_existing_pending_windows(monkeypatch) -> None:  # noqa: ANN001
+def test_enqueue_bronze_repair_jobs_respects_existing_pending_windows(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     coverage_hour = datetime(2026, 3, 10, 0, 0, tzinfo=timezone.utc)
     cursor = FakeCursor(
         fetchall_values=[
@@ -100,7 +113,9 @@ def test_enqueue_bronze_repair_jobs_respects_existing_pending_windows(monkeypatc
     )
     conn = FakeConnection(cursor)
     monkeypatch.setattr(pipeline_repair, "db_connect", lambda: conn)
-    monkeypatch.setattr(pipeline_repair, "recover_stale_bronze_repair_jobs", lambda _dataset_id: 0)
+    monkeypatch.setattr(
+        pipeline_repair, "recover_stale_bronze_repair_jobs", lambda _dataset_id: 0
+    )
     monkeypatch.setattr(
         pipeline_repair,
         "_floor_to_step",
@@ -117,7 +132,9 @@ def test_enqueue_bronze_repair_jobs_respects_existing_pending_windows(monkeypatc
     assert conn.committed is True
 
 
-def test_enqueue_bronze_repair_jobs_requeues_failed_windows(monkeypatch) -> None:  # noqa: ANN001
+def test_enqueue_bronze_repair_jobs_requeues_failed_windows(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     coverage_hour = datetime(2026, 3, 10, 0, 0, tzinfo=timezone.utc)
     cursor = FakeCursor(
         fetchall_values=[
@@ -133,7 +150,9 @@ def test_enqueue_bronze_repair_jobs_requeues_failed_windows(monkeypatch) -> None
     )
     conn = FakeConnection(cursor)
     monkeypatch.setattr(pipeline_repair, "db_connect", lambda: conn)
-    monkeypatch.setattr(pipeline_repair, "recover_stale_bronze_repair_jobs", lambda _dataset_id: 0)
+    monkeypatch.setattr(
+        pipeline_repair, "recover_stale_bronze_repair_jobs", lambda _dataset_id: 0
+    )
     monkeypatch.setattr(
         pipeline_repair,
         "_floor_to_step",
@@ -150,14 +169,20 @@ def test_enqueue_bronze_repair_jobs_requeues_failed_windows(monkeypatch) -> None
     assert "insert into ops.bronze_repair_jobs" in cursor.executed[-1][0].lower()
 
 
-def test_claim_next_bronze_repair_hour_returns_none_when_empty(monkeypatch) -> None:  # noqa: ANN001
+def test_claim_next_bronze_repair_hour_returns_none_when_empty(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     cursor = FakeCursor(fetchone_values=[None])
     monkeypatch.setattr(pipeline_repair, "db_connect", lambda: FakeConnection(cursor))
 
-    assert pipeline_repair.claim_next_bronze_repair_hour("electricity_region_data") is None
+    assert (
+        pipeline_repair.claim_next_bronze_repair_hour("electricity_region_data") is None
+    )
 
 
-def test_claim_next_bronze_repair_hour_returns_cli_fields(monkeypatch) -> None:  # noqa: ANN001
+def test_claim_next_bronze_repair_hour_returns_cli_fields(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     row = (
         7,
         "electricity_region_data",
@@ -197,7 +222,9 @@ def test_mark_bronze_repair_completed_updates_job(monkeypatch) -> None:  # noqa:
     assert cursor.executed[0][1] == (42,)
 
 
-def test_mark_bronze_repair_failed_truncates_error_message(monkeypatch) -> None:  # noqa: ANN001
+def test_mark_bronze_repair_failed_truncates_error_message(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     cursor = FakeCursor()
     conn = FakeConnection(cursor)
     monkeypatch.setattr(pipeline_repair, "db_connect", lambda: conn)
@@ -210,21 +237,31 @@ def test_mark_bronze_repair_failed_truncates_error_message(monkeypatch) -> None:
     assert params[1] == 42
 
 
-def test_trigger_repair_dag_if_idle_returns_false_when_no_pending_work(monkeypatch) -> None:  # noqa: ANN001
+def test_trigger_repair_dag_if_idle_returns_false_when_no_pending_work(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     cursor = FakeCursor(fetchone_values=[(False,), (0,)])
     monkeypatch.setattr(pipeline_repair, "db_connect", lambda: FakeConnection(cursor))
 
-    assert pipeline_repair.trigger_repair_dag_if_idle("electricity_region_data") is False
+    assert (
+        pipeline_repair.trigger_repair_dag_if_idle("electricity_region_data") is False
+    )
 
 
-def test_trigger_repair_dag_if_idle_returns_false_when_run_active(monkeypatch) -> None:  # noqa: ANN001
+def test_trigger_repair_dag_if_idle_returns_false_when_run_active(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     cursor = FakeCursor(fetchone_values=[(True,), (1,)])
     monkeypatch.setattr(pipeline_repair, "db_connect", lambda: FakeConnection(cursor))
 
-    assert pipeline_repair.trigger_repair_dag_if_idle("electricity_region_data") is False
+    assert (
+        pipeline_repair.trigger_repair_dag_if_idle("electricity_region_data") is False
+    )
 
 
-def test_trigger_repair_dag_if_idle_triggers_when_pending_and_idle(monkeypatch) -> None:  # noqa: ANN001
+def test_trigger_repair_dag_if_idle_triggers_when_pending_and_idle(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     triggered: list[dict] = []
     cursor = FakeCursor(fetchone_values=[(True,), (0,)])
     monkeypatch.setattr(pipeline_repair, "db_connect", lambda: FakeConnection(cursor))
@@ -240,7 +277,9 @@ def test_trigger_repair_dag_if_idle_triggers_when_pending_and_idle(monkeypatch) 
     assert triggered[0]["dag_id"] == "electricity_region_data_bronze_hourly_repair"
 
 
-def test_trigger_repair_dag_if_idle_supports_ignore_run_id(monkeypatch) -> None:  # noqa: ANN001
+def test_trigger_repair_dag_if_idle_supports_ignore_run_id(
+    monkeypatch,
+) -> None:  # noqa: ANN001
     triggered: list[dict] = []
     cursor = FakeCursor(fetchone_values=[(True,), (0,)])
     monkeypatch.setattr(pipeline_repair, "db_connect", lambda: FakeConnection(cursor))
@@ -256,4 +295,7 @@ def test_trigger_repair_dag_if_idle_supports_ignore_run_id(monkeypatch) -> None:
     )
 
     assert result is True
-    assert cursor.executed[1][1] == ("electricity_region_data_bronze_hourly_repair", "repair_chain__existing")
+    assert cursor.executed[1][1] == (
+        "electricity_region_data_bronze_hourly_repair",
+        "repair_chain__existing",
+    )

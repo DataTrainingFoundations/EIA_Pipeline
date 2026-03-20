@@ -68,7 +68,9 @@ def validate_dataset_registry(registry: dict[str, dict[str, Any]]) -> None:
         missing_fields = sorted(required_fields - dataset.keys())
         if missing_fields:
             missing_fields_text = ", ".join(missing_fields)
-            raise ValueError(f"Dataset '{dataset_id}' is missing required fields: {missing_fields_text}")
+            raise ValueError(
+                f"Dataset '{dataset_id}' is missing required fields: {missing_fields_text}"
+            )
 
         backfill_config = dataset.get("backfill") or {}
         step = backfill_config.get("step")
@@ -79,7 +81,10 @@ def validate_dataset_registry(registry: dict[str, dict[str, Any]]) -> None:
             )
 
         hourly_window_mode = dataset.get("hourly_window_mode")
-        if hourly_window_mode and hourly_window_mode not in SUPPORTED_HOURLY_WINDOW_MODES:
+        if (
+            hourly_window_mode
+            and hourly_window_mode not in SUPPORTED_HOURLY_WINDOW_MODES
+        ):
             supported_modes = ", ".join(sorted(SUPPORTED_HOURLY_WINDOW_MODES))
             raise ValueError(
                 f"Dataset '{dataset_id}' uses unsupported hourly window mode '{hourly_window_mode}'. Supported: {supported_modes}"

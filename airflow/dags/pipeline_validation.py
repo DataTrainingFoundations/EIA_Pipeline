@@ -6,9 +6,13 @@ import logging
 from contextlib import closing
 from typing import Any
 
+from pipeline_runtime import (
+    current_airflow_log_fields,
+    db_connect,
+    format_log_fields,
+    split_table_name,
+)
 from psycopg2 import sql
-
-from pipeline_runtime import current_airflow_log_fields, db_connect, format_log_fields, split_table_name
 
 logger = logging.getLogger(__name__)
 
@@ -56,32 +60,38 @@ def merge_stage_into_target(
 
     target_schema, target_relation = split_table_name(target_table)
     stage_schema, stage_relation = split_table_name(stage_table)
-    update_columns = update_columns or [column for column in insert_columns if column not in conflict_columns]
+    update_columns = update_columns or [
+        column for column in insert_columns if column not in conflict_columns
+    ]
 
     if allow_missing_stage and not stage_table_has_rows(stage_table):
         logger.info(
             "Skipping merge because the stage table is missing or empty %s",
-            format_log_fields(**current_airflow_log_fields(), stage_table=stage_table, target_table=target_table),
+            format_log_fields(
+                **current_airflow_log_fields(),
+                stage_table=stage_table,
+                target_table=target_table,
+            ),
         )
         return
 
     insert_identifiers = [sql.Identifier(column) for column in insert_columns]
     conflict_identifiers = [sql.Identifier(column) for column in conflict_columns]
     update_assignments = [
-        sql.SQL("{} = excluded.{}").format(sql.Identifier(column), sql.Identifier(column))
+        sql.SQL("{} = excluded.{}").format(
+            sql.Identifier(column), sql.Identifier(column)
+        )
         for column in update_columns
     ]
 
     with closing(db_connect()) as conn, closing(conn.cursor()) as cur:
-        merge_statement = sql.SQL(
-            """
+        merge_statement = sql.SQL("""
             insert into {}.{} ({})
             select {}
             from {}.{}
             on conflict ({})
             do update set {}
-            """
-        ).format(
+            """).format(
             sql.Identifier(target_schema),
             sql.Identifier(target_relation),
             sql.SQL(", ").join(insert_identifiers),
@@ -127,7 +137,11 @@ def validate_table_has_rows(
     if allow_missing_table and not stage_table_has_rows(table_name):
         logger.info(
             "Skipping row validation because the table is missing %s",
-            format_log_fields(**current_airflow_log_fields(), table_name=table_name, description=description or table_name),
+            format_log_fields(
+                **current_airflow_log_fields(),
+                table_name=table_name,
+                description=description or table_name,
+            ),
         )
         return
     query = sql.SQL("select count(*) from {}.{}").format(
@@ -154,12 +168,18 @@ def validate_table_has_rows(
     if allow_empty_result and row_count == 0:
         logger.info(
             "Allowing empty row validation result %s",
-            format_log_fields(**current_airflow_log_fields(), target_table=table_name, description=description or table_name),
+            format_log_fields(
+                **current_airflow_log_fields(),
+                target_table=table_name,
+                description=description or table_name,
+            ),
         )
         return
     if row_count < min_rows:
         label = description or table_name
-        raise ValueError(f"Validation failed: expected at least {min_rows} row(s) for {label}, found {row_count}")
+        raise ValueError(
+            f"Validation failed: expected at least {min_rows} row(s) for {label}, found {row_count}"
+        )
 
 
 def validate_distinct_values(
@@ -200,7 +220,11 @@ def validate_distinct_values(
     if allow_empty_result and distinct_count == 0:
         logger.info(
             "Allowing empty distinct validation result %s",
-            format_log_fields(**current_airflow_log_fields(), target_table=table_name, column_name=column_name),
+            format_log_fields(
+                **current_airflow_log_fields(),
+                target_table=table_name,
+                column_name=column_name,
+            ),
         )
         return
     if distinct_count < min_distinct:
@@ -237,10 +261,13 @@ def validate_numeric_bounds(
             sql.SQL(" or ").join(conditions[1:]),
         )
 
-    query = sql.SQL("select count(*) from {}.{} where ").format(
-        sql.Identifier(schema_name),
-        sql.Identifier(relation_name),
-    ) + invalid_filter
+    query = (
+        sql.SQL("select count(*) from {}.{} where ").format(
+            sql.Identifier(schema_name),
+            sql.Identifier(relation_name),
+        )
+        + invalid_filter
+    )
 
     query_params: list[Any] = []
     if min_value is not None:
@@ -281,7 +308,11 @@ def validate_numeric_bounds(
     if allow_empty_result and total_count == 0:
         logger.info(
             "Allowing empty numeric bounds validation result %s",
-            format_log_fields(**current_airflow_log_fields(), target_table=table_name, column_name=column_name),
+            format_log_fields(
+                **current_airflow_log_fields(),
+                target_table=table_name,
+                column_name=column_name,
+            ),
         )
         return
     if invalid_count > 0:
@@ -291,4 +322,6 @@ def validate_numeric_bounds(
         if max_value is not None:
             bounds.append(f"<= {max_value}")
         label = description or f"{table_name}.{column_name}"
-        raise ValueError(f"Validation failed: {label} contains {invalid_count} row(s) outside bounds {' and '.join(bounds)}")
+        raise ValueError(
+            f"Validation failed: {label} contains {invalid_count} row(s) outside bounds {' and '.join(bounds)}"
+        )

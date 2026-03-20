@@ -14,7 +14,10 @@ from typing import Any
 def configure_logging() -> None:
     """Configure the default log format for Spark job entrypoints."""
 
-    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
 
 
 def format_log_fields(**fields: Any) -> str:

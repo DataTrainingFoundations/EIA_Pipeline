@@ -34,7 +34,9 @@ def _start_of_calendar_week(value: datetime) -> datetime:
     return start_of_day - timedelta(days=start_of_day.weekday())
 
 
-def _load_existing_backfill_jobs(cur, dataset_id: str, history_start: datetime, boundary: datetime) -> dict[tuple[datetime, datetime], str]:
+def _load_existing_backfill_jobs(
+    cur, dataset_id: str, history_start: datetime, boundary: datetime
+) -> dict[tuple[datetime, datetime], str]:
     """Load existing backfill jobs so enqueue logic can avoid duplicate work."""
 
     cur.execute(
@@ -48,7 +50,10 @@ def _load_existing_backfill_jobs(cur, dataset_id: str, history_start: datetime, 
         (dataset_id, history_start, boundary),
     )
     return {
-        (chunk_start_utc.astimezone(timezone.utc), chunk_end_utc.astimezone(timezone.utc)): status
+        (
+            chunk_start_utc.astimezone(timezone.utc),
+            chunk_end_utc.astimezone(timezone.utc),
+        ): status
         for chunk_start_utc, chunk_end_utc, status in cur.fetchall()
     }
 
@@ -92,7 +97,9 @@ def recover_stale_backfill_jobs(dataset_id: str) -> int:
     return recovered
 
 
-def enqueue_backfill_jobs(dataset_id: str, max_pending_override: int | None = None) -> int:
+def enqueue_backfill_jobs(
+    dataset_id: str, max_pending_override: int | None = None
+) -> int:
     """Create pending backfill jobs from the newest missing window backward."""
 
     dataset = get_dataset(dataset_id)
@@ -102,8 +109,14 @@ def enqueue_backfill_jobs(dataset_id: str, max_pending_override: int | None = No
         raise ValueError(f"Unsupported backfill step '{step}'")
 
     history_start = _floor_to_step(_parse_utc(backfill_config["start"]), step)
-    pending_limit = max_pending_override if max_pending_override is not None else int(backfill_config.get("max_pending_chunks", 14))
-    boundary = _floor_to_step(datetime.now(timezone.utc), step if step in {"month", "year"} else "hour")
+    pending_limit = (
+        max_pending_override
+        if max_pending_override is not None
+        else int(backfill_config.get("max_pending_chunks", 14))
+    )
+    boundary = _floor_to_step(
+        datetime.now(timezone.utc), step if step in {"month", "year"} else "hour"
+    )
 
     inserted = 0
     open_window_count = 0
@@ -111,16 +124,22 @@ def enqueue_backfill_jobs(dataset_id: str, max_pending_override: int | None = No
     recover_stale_backfill_jobs(dataset_id)
 
     with closing(db_connect()) as conn, closing(conn.cursor()) as cur:
-        existing_jobs = _load_existing_backfill_jobs(cur, dataset_id, history_start, boundary)
+        existing_jobs = _load_existing_backfill_jobs(
+            cur, dataset_id, history_start, boundary
+        )
 
         candidate_windows: list[tuple[datetime, datetime]] = []
         if step in {"hour", "day"}:
             current_week_start = _start_of_calendar_week(boundary)
             if boundary > current_week_start:
-                candidate_windows.append((max(history_start, current_week_start), boundary))
+                candidate_windows.append(
+                    (max(history_start, current_week_start), boundary)
+                )
 
             candidate_end = current_week_start
-            while len(candidate_windows) < pending_limit and candidate_end > history_start:
+            while (
+                len(candidate_windows) < pending_limit and candidate_end > history_start
+            ):
                 candidate_start = max(history_start, candidate_end - timedelta(days=7))
                 if candidate_start >= candidate_end:
                     break
@@ -128,7 +147,9 @@ def enqueue_backfill_jobs(dataset_id: str, max_pending_override: int | None = No
                 candidate_end = candidate_start
         else:
             candidate_end = boundary
-            while len(candidate_windows) < pending_limit and candidate_end > history_start:
+            while (
+                len(candidate_windows) < pending_limit and candidate_end > history_start
+            ):
                 candidate_start = max(history_start, _retreat_step(candidate_end, step))
                 if candidate_start >= candidate_end:
                     break
@@ -238,8 +259,16 @@ def claim_next_backfill_chunk(dataset_id: str) -> dict[str, Any] | None:
         "dataset_id": claimed_dataset_id,
         "chunk_start_utc": chunk_start_utc.isoformat(),
         "chunk_end_utc": chunk_end_utc.isoformat(),
-        "chunk_start_cli": _format_cli_hour(chunk_start_utc) if step in {"hour", "day"} else _format_cli_timestamp(chunk_start_utc),
-        "chunk_end_cli": _format_cli_hour(chunk_end_utc) if step in {"hour", "day"} else _format_cli_timestamp(chunk_end_utc),
+        "chunk_start_cli": (
+            _format_cli_hour(chunk_start_utc)
+            if step in {"hour", "day"}
+            else _format_cli_timestamp(chunk_start_utc)
+        ),
+        "chunk_end_cli": (
+            _format_cli_hour(chunk_end_utc)
+            if step in {"hour", "day"}
+            else _format_cli_timestamp(chunk_end_utc)
+        ),
     }
 
 
@@ -288,7 +317,9 @@ def mark_backfill_failed(job_id: int, error_message: str) -> None:
         conn.commit()
     logger.error(
         "Marked backfill job failed %s",
-        format_log_fields(**current_airflow_log_fields(), job_id=job_id, error=error_message[:4000]),
+        format_log_fields(
+            **current_airflow_log_fields(), job_id=job_id, error=error_message[:4000]
+        ),
     )
 
 
@@ -310,7 +341,9 @@ def has_completed_backfill(dataset_id: str) -> bool:
         return bool(cur.fetchone()[0])
 
 
-def trigger_backfill_dag_if_idle(dataset_id: str, ignore_run_id: str | None = None) -> bool:
+def trigger_backfill_dag_if_idle(
+    dataset_id: str, ignore_run_id: str | None = None
+) -> bool:
     """Trigger the backfill DAG when pending backfill work exists and the DAG is idle."""
 
     backfill_dag_id = f"{dataset_id}_backfill"
@@ -355,23 +388,39 @@ def trigger_backfill_dag_if_idle(dataset_id: str, ignore_run_id: str | None = No
     if not has_pending:
         logger.info(
             "Not triggering backfill DAG because no pending jobs exist %s",
-            format_log_fields(**current_airflow_log_fields(), dataset_id=dataset_id, target_dag_id=backfill_dag_id),
+            format_log_fields(
+                **current_airflow_log_fields(),
+                dataset_id=dataset_id,
+                target_dag_id=backfill_dag_id,
+            ),
         )
         return False
 
     if active_runs > 0:
         logger.info(
             "Not triggering backfill DAG because another run is active %s",
-            format_log_fields(**current_airflow_log_fields(), dataset_id=dataset_id, target_dag_id=backfill_dag_id, active_runs=active_runs),
+            format_log_fields(
+                **current_airflow_log_fields(),
+                dataset_id=dataset_id,
+                target_dag_id=backfill_dag_id,
+                active_runs=active_runs,
+            ),
         )
         return False
 
     from airflow.api.common.trigger_dag import trigger_dag
 
     run_id = f"backfill_chain__{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f')}"
-    trigger_dag(dag_id=backfill_dag_id, run_id=run_id, conf={"trigger_source": "backfill_queue"})
+    trigger_dag(
+        dag_id=backfill_dag_id, run_id=run_id, conf={"trigger_source": "backfill_queue"}
+    )
     logger.info(
         "Triggered backfill DAG because pending jobs exist and the DAG is idle %s",
-        format_log_fields(**current_airflow_log_fields(), dataset_id=dataset_id, target_dag_id=backfill_dag_id, triggered_run_id=run_id),
+        format_log_fields(
+            **current_airflow_log_fields(),
+            dataset_id=dataset_id,
+            target_dag_id=backfill_dag_id,
+            triggered_run_id=run_id,
+        ),
     )
     return True

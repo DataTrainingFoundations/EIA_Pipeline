@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from typing import Any
 
 import pandas as pd
 import psycopg2
 import streamlit as st
-
-from data_access_shared import PLATINUM_TABLE, RESOURCE_PLANNING_TABLE, _safe_read_sql, get_connection
-from data_access_shared import GRID_OPERATIONS_TABLE
-from contextlib import closing
+from data_access_shared import (
+    GRID_OPERATIONS_TABLE,
+    PLATINUM_TABLE,
+    RESOURCE_PLANNING_TABLE,
+    _safe_read_sql,
+    get_connection,
+)
 
 
 @st.cache_data(ttl=60)

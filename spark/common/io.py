@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import time
 
-from pyspark.sql import DataFrame
-from pyspark.sql import Window
+from pyspark.sql import DataFrame, Window
 from pyspark.sql import functions as F
 
 
@@ -30,16 +29,22 @@ def glob_has_matches(spark, path_pattern: str) -> bool:  # noqa: ANN001
     return statuses is not None and len(statuses) > 0
 
 
-def partitioned_parquet_glob(base_path: str, partition_column: str = "event_date") -> str:
+def partitioned_parquet_glob(
+    base_path: str, partition_column: str = "event_date"
+) -> str:
     """Return the standard parquet glob used by day-partitioned datasets."""
 
     return f"{base_path.rstrip('/')}/{partition_column}=*/*.parquet"
 
 
-def has_partitioned_parquet_input(spark, base_path: str, partition_column: str = "event_date") -> bool:  # noqa: ANN001
+def has_partitioned_parquet_input(
+    spark, base_path: str, partition_column: str = "event_date"
+) -> bool:  # noqa: ANN001
     """Return whether a partitioned parquet dataset exists and has files."""
 
-    return path_exists(spark, base_path) and glob_has_matches(spark, partitioned_parquet_glob(base_path, partition_column))
+    return path_exists(spark, base_path) and glob_has_matches(
+        spark, partitioned_parquet_glob(base_path, partition_column)
+    )
 
 
 def _is_retryable_missing_file_error(exc: Exception) -> bool:
@@ -49,21 +54,30 @@ def _is_retryable_missing_file_error(exc: Exception) -> bool:
 
 def _is_empty_parquet_schema_error(exc: Exception) -> bool:
     message = str(exc)
-    return "UNABLE_TO_INFER_SCHEMA" in message or "Unable to infer schema for Parquet" in message
+    return (
+        "UNABLE_TO_INFER_SCHEMA" in message
+        or "Unable to infer schema for Parquet" in message
+    )
 
 
-def _read_with_retries(loader, *, retries: int, retry_delay_seconds: float):  # noqa: ANN001, ANN202
+def _read_with_retries(
+    loader, *, retries: int, retry_delay_seconds: float
+):  # noqa: ANN001, ANN202
     attempts = retries + 1
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
             return loader()
-        except Exception as exc:  # pragma: no cover - Spark raises environment-specific wrappers
+        except (
+            Exception
+        ) as exc:  # pragma: no cover - Spark raises environment-specific wrappers
             if attempt >= attempts or not _is_retryable_missing_file_error(exc):
                 raise
             last_error = exc
             time.sleep(retry_delay_seconds)
-    if last_error is not None:  # pragma: no cover - defensive, loop always returns or raises
+    if (
+        last_error is not None
+    ):  # pragma: no cover - defensive, loop always returns or raises
         raise last_error
     raise RuntimeError("Parquet read retry loop exited unexpectedly")
 
@@ -84,7 +98,9 @@ def read_partitioned_parquet(
     """
 
     return _read_with_retries(
-        lambda: spark.read.option("basePath", base_path).parquet(partitioned_parquet_glob(base_path, partition_column)),
+        lambda: spark.read.option("basePath", base_path).parquet(
+            partitioned_parquet_glob(base_path, partition_column)
+        ),
         retries=retries,
         retry_delay_seconds=retry_delay_seconds,
     )
@@ -107,13 +123,17 @@ def read_parquet_if_exists(
             retries=retries,
             retry_delay_seconds=retry_delay_seconds,
         )
-    except Exception as exc:  # pragma: no cover - Spark raises environment-specific wrappers
+    except (
+        Exception
+    ) as exc:  # pragma: no cover - Spark raises environment-specific wrappers
         if _is_empty_parquet_schema_error(exc):
             return None
         raise
 
 
-def write_partitioned_parquet(df: DataFrame, output_path: str, partition_column: str = "event_date") -> None:
+def write_partitioned_parquet(
+    df: DataFrame, output_path: str, partition_column: str = "event_date"
+) -> None:
     """Overwrite only touched partitions for a parquet dataset.
 
     Airflow runs the Silver and Gold jobs for narrow hourly windows. Dynamic
@@ -145,18 +165,28 @@ def merge_partitioned_parquet(
         return
 
     spark = df.sparkSession
-    partition_values = [row[partition_column] for row in df.select(partition_column).dropna().distinct().collect()]
+    partition_values = [
+        row[partition_column]
+        for row in df.select(partition_column).dropna().distinct().collect()
+    ]
     if not partition_values:
         return
 
-    partition_paths = [f"{output_path.rstrip('/')}/{partition_column}={partition_value}" for partition_value in partition_values]
+    partition_paths = [
+        f"{output_path.rstrip('/')}/{partition_column}={partition_value}"
+        for partition_value in partition_values
+    ]
     existing_paths = [path for path in partition_paths if path_exists(spark, path)]
     combined_df = df
     if existing_paths:
-        existing_df = spark.read.option("basePath", output_path).parquet(*existing_paths)
+        existing_df = spark.read.option("basePath", output_path).parquet(
+            *existing_paths
+        )
         combined_df = existing_df.unionByName(df, allowMissingColumns=True)
 
-    ordering = [F.col(column_name).desc_nulls_last() for column_name in freshness_columns]
+    ordering = [
+        F.col(column_name).desc_nulls_last() for column_name in freshness_columns
+    ]
     merge_window = Window.partitionBy(*merge_keys).orderBy(*ordering)
     merged_df = (
         combined_df.withColumn("_merge_rank", F.row_number().over(merge_window))

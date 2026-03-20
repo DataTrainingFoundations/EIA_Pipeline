@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from datetime import timedelta
+from datetime import datetime, timedelta
 
-from airflow import DAG
 from airflow.operators.bash import BashOperator
-
 from pipeline_builders import (
     build_first_backfill_sensor,
     build_merge_task,
@@ -28,6 +25,8 @@ from pipeline_constants import (
 )
 from pipeline_support import build_spark_submit_command
 
+from airflow import DAG
+
 PLATINUM_DEFAULT_ARGS = {"retries": 1, "retry_delay": timedelta(minutes=5)}
 
 
@@ -45,11 +44,17 @@ def build_grid_operations_dag() -> DAG:
         tags=["platinum", "grid-operations", "hourly"],
     ) as dag:
         stage_table = "platinum.grid_operations_hourly_stage_{{ ts_nodash | lower }}"
-        alert_stage_table = "platinum.grid_operations_alert_hourly_stage_{{ ts_nodash | lower }}"
+        alert_stage_table = (
+            "platinum.grid_operations_alert_hourly_stage_{{ ts_nodash | lower }}"
+        )
         lookback_start_expr = "{{ (data_interval_end.in_timezone('UTC') - macros.timedelta(days=14)).isoformat() }}"
         end_expr = "{{ data_interval_end.in_timezone('UTC').isoformat() }}"
-        wait_for_region_first_backfill = build_first_backfill_sensor("wait_for_region_first_backfill", "electricity_region_data")
-        wait_for_fuel_first_backfill = build_first_backfill_sensor("wait_for_fuel_first_backfill", "electricity_fuel_type_data")
+        wait_for_region_first_backfill = build_first_backfill_sensor(
+            "wait_for_region_first_backfill", "electricity_region_data"
+        )
+        wait_for_fuel_first_backfill = build_first_backfill_sensor(
+            "wait_for_fuel_first_backfill", "electricity_fuel_type_data"
+        )
 
         build_stage = BashOperator(
             task_id="build_grid_operations_hourly_stage",
@@ -73,7 +78,12 @@ def build_grid_operations_dag() -> DAG:
                 ],
             ),
         )
-        validate_stage_rows = build_validate_rows_task("validate_grid_operations_stage_rows", stage_table, description="grid operations stage rows", allow_missing_table=True)
+        validate_stage_rows = build_validate_rows_task(
+            "validate_grid_operations_stage_rows",
+            stage_table,
+            description="grid operations stage rows",
+            allow_missing_table=True,
+        )
         merge_status = build_merge_task(
             "merge_grid_operations_hourly_stage",
             "platinum.grid_operations_hourly",
@@ -125,7 +135,16 @@ def build_grid_operations_dag() -> DAG:
         )
 
         [wait_for_region_first_backfill, wait_for_fuel_first_backfill] >> build_stage
-        build_stage >> validate_stage_rows >> merge_status >> merge_alerts >> validate_rows >> validate_respondents >> validate_coverage_ratio >> validate_renewable_share
+        (
+            build_stage
+            >> validate_stage_rows
+            >> merge_status
+            >> merge_alerts
+            >> validate_rows
+            >> validate_respondents
+            >> validate_coverage_ratio
+            >> validate_renewable_share
+        )
 
     return dag
 
@@ -147,8 +166,12 @@ def build_resource_planning_dag() -> DAG:
         lookback_start_expr = "{{ (data_interval_end.in_timezone('UTC') - macros.timedelta(days=35)).isoformat() }}"
         end_expr = "{{ data_interval_end.in_timezone('UTC').isoformat() }}"
         recent_where = "date >= current_date - interval '35 days'"
-        wait_for_region_first_backfill = build_first_backfill_sensor("wait_for_region_first_backfill", "electricity_region_data")
-        wait_for_fuel_first_backfill = build_first_backfill_sensor("wait_for_fuel_first_backfill", "electricity_fuel_type_data")
+        wait_for_region_first_backfill = build_first_backfill_sensor(
+            "wait_for_region_first_backfill", "electricity_region_data"
+        )
+        wait_for_fuel_first_backfill = build_first_backfill_sensor(
+            "wait_for_fuel_first_backfill", "electricity_fuel_type_data"
+        )
 
         build_stage = BashOperator(
             task_id="build_resource_planning_daily_stage",
@@ -179,7 +202,12 @@ def build_resource_planning_dag() -> DAG:
             RESOURCE_PLANNING_COLUMNS,
             ["date", "respondent"],
         )
-        validate_stage_rows = build_validate_rows_task("validate_resource_planning_stage_rows", stage_table, description="resource planning stage rows", allow_missing_table=True)
+        validate_stage_rows = build_validate_rows_task(
+            "validate_resource_planning_stage_rows",
+            stage_table,
+            description="resource planning stage rows",
+            allow_missing_table=True,
+        )
         validate_rows = build_validate_rows_task(
             "validate_resource_planning_rows",
             "platinum.resource_planning_daily",
@@ -216,6 +244,14 @@ def build_resource_planning_dag() -> DAG:
         )
 
         [wait_for_region_first_backfill, wait_for_fuel_first_backfill] >> build_stage
-        build_stage >> validate_stage_rows >> merge >> validate_rows >> validate_respondents >> validate_renewable_share >> validate_carbon_intensity
+        (
+            build_stage
+            >> validate_stage_rows
+            >> merge
+            >> validate_rows
+            >> validate_respondents
+            >> validate_renewable_share
+            >> validate_carbon_intensity
+        )
 
     return dag

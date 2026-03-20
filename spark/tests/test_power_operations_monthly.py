@@ -34,7 +34,13 @@ def test_clean_power_operational_data_parses_monthly_rows(spark_session) -> None
     )
 
     cleaned_df = clean_power_operational_data(bronze_df)
-    row = cleaned_df.selectExpr("date_format(period, 'yyyy-MM') as period_month", "location", "sector_id", "fueltype_id", "generation_thousand_mwh").collect()[0]
+    row = cleaned_df.selectExpr(
+        "date_format(period, 'yyyy-MM') as period_month",
+        "location",
+        "sector_id",
+        "fueltype_id",
+        "generation_thousand_mwh",
+    ).collect()[0]
 
     assert row["period_month"] == "2026-01"
     assert row["location"] == "US"
@@ -43,7 +49,9 @@ def test_clean_power_operational_data_parses_monthly_rows(spark_session) -> None
     assert row["generation_thousand_mwh"] == 20.0
 
 
-def test_gold_power_operations_monthly_fact_keeps_latest_business_key(spark_session) -> None:
+def test_gold_power_operations_monthly_fact_keeps_latest_business_key(
+    spark_session,
+) -> None:
     silver_df = spark_session.createDataFrame(
         [
             {
@@ -90,7 +98,9 @@ def test_gold_power_operations_monthly_fact_keeps_latest_business_key(spark_sess
     assert row["consumption_for_eg_thousand_units"] == 6.0
 
 
-def test_platinum_power_operations_monthly_derives_share_and_heat_rate(spark_session) -> None:
+def test_platinum_power_operations_monthly_derives_share_and_heat_rate(
+    spark_session,
+) -> None:
     gold_df = spark_session.createDataFrame(
         [
             {
@@ -126,7 +136,9 @@ def test_platinum_power_operations_monthly_derives_share_and_heat_rate(spark_ses
         ]
     )
 
-    platinum_df = build_power_operations_monthly(gold_df, "2026-01-01T00:00:00+00:00", "2026-02-01T00:00:00+00:00")
+    platinum_df = build_power_operations_monthly(
+        gold_df, "2026-01-01T00:00:00+00:00", "2026-02-01T00:00:00+00:00"
+    )
     rows = {row["fueltype_id"]: row for row in platinum_df.collect()}
 
     assert rows["COL"]["generation_share_pct"] == 60.0

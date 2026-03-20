@@ -13,21 +13,21 @@ $qualityTargets = @("ingestion", "airflow", "app", "spark")
 
 switch ($Mode) {
     "lint" {
-        ruff check @qualityTargets
+        python -m ruff check @qualityTargets
     }
     "format" {
-        black @qualityTargets
-        ruff check --fix @qualityTargets
+        python -m black @qualityTargets
+        python -m ruff check --fix @qualityTargets
     }
     "format-check" {
-        black --check @qualityTargets
+        python -m black --check @qualityTargets
     }
     "quality" {
-        ruff check @qualityTargets
+        python -m ruff check @qualityTargets
         if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
         }
-        black --check @qualityTargets
+        python -m black --check @qualityTargets
         if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
         }

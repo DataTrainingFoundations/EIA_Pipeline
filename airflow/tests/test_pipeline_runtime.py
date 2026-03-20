@@ -1,4 +1,8 @@
-from pipeline_runtime import _floor_to_step, build_spark_submit_command, format_log_fields
+from pipeline_runtime import (
+    _floor_to_step,
+    build_spark_submit_command,
+    format_log_fields,
+)
 
 
 def test_build_spark_submit_command_quotes_airflow_templates() -> None:
@@ -22,4 +26,9 @@ def test_floor_to_step_rounds_to_day_boundary() -> None:
 
 
 def test_format_log_fields_skips_empty_values() -> None:
-    assert format_log_fields(dataset_id="electricity_region_data", run_id=None, task_id="ingest") == "dataset_id=electricity_region_data task_id=ingest"
+    assert (
+        format_log_fields(
+            dataset_id="electricity_region_data", run_id=None, task_id="ingest"
+        )
+        == "dataset_id=electricity_region_data task_id=ingest"
+    )

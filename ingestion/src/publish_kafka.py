@@ -41,7 +41,11 @@ def create_producer(
 
     bootstrap_servers = broker or os.getenv("KAFKA_BROKER", "kafka:9092")
     protocol = security_protocol or os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT")
-    logger.info("Creating Kafka producer bootstrap_servers=%s security_protocol=%s", bootstrap_servers, protocol)
+    logger.info(
+        "Creating Kafka producer bootstrap_servers=%s security_protocol=%s",
+        bootstrap_servers,
+        protocol,
+    )
     return KafkaProducer(
         bootstrap_servers=bootstrap_servers,
         security_protocol=protocol,
@@ -62,8 +66,14 @@ def create_admin_client(
 
     bootstrap_servers = broker or os.getenv("KAFKA_BROKER", "kafka:9092")
     protocol = security_protocol or os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT")
-    logger.info("Creating Kafka admin client bootstrap_servers=%s security_protocol=%s", bootstrap_servers, protocol)
-    return KafkaAdminClient(bootstrap_servers=bootstrap_servers, security_protocol=protocol)
+    logger.info(
+        "Creating Kafka admin client bootstrap_servers=%s security_protocol=%s",
+        bootstrap_servers,
+        protocol,
+    )
+    return KafkaAdminClient(
+        bootstrap_servers=bootstrap_servers, security_protocol=protocol
+    )
 
 
 def ensure_topic_exists(
@@ -78,7 +88,9 @@ def ensure_topic_exists(
         if topic in set(admin_client.list_topics()):
             return
         logger.info("Creating Kafka topic topic=%s", topic)
-        admin_client.create_topics([NewTopic(name=topic, num_partitions=1, replication_factor=1)])
+        admin_client.create_topics(
+            [NewTopic(name=topic, num_partitions=1, replication_factor=1)]
+        )
     except TopicAlreadyExistsError:
         logger.info("Kafka topic already exists topic=%s", topic)
     finally:
@@ -111,7 +123,9 @@ def publish_events(
     producer = producer or create_producer()
     futures = []
     sent = 0
-    logger.info("Publishing Kafka events topic=%s owns_producer=%s", topic, owns_producer)
+    logger.info(
+        "Publishing Kafka events topic=%s owns_producer=%s", topic, owns_producer
+    )
     try:
         ensure_topic_exists(topic, admin_client=admin_client)
         for event in events:

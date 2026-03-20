@@ -1,8 +1,11 @@
 from pathlib import Path
 
 import pytest
-
-from src.eia_api import build_eia_query_params, fetch_dataset_rows, resolve_api_window_bounds
+from src.eia_api import (
+    build_eia_query_params,
+    fetch_dataset_rows,
+    resolve_api_window_bounds,
+)
 from src.event_factory import build_event, build_event_id
 from src.registry import load_dataset_registry, validate_dataset_registry
 
@@ -66,10 +69,15 @@ def test_build_query_params_applies_facets() -> None:
 
 
 def test_resolve_api_window_bounds_converts_exclusive_hourly_end() -> None:
-    assert resolve_api_window_bounds("2026-03-15T14", "2026-03-15T15") == ("2026-03-15T14", "2026-03-15T14")
+    assert resolve_api_window_bounds("2026-03-15T14", "2026-03-15T15") == (
+        "2026-03-15T14",
+        "2026-03-15T14",
+    )
 
 
-def test_resolve_api_window_bounds_extends_current_day_end_for_region_forecast() -> None:
+def test_resolve_api_window_bounds_extends_current_day_end_for_region_forecast() -> (
+    None
+):
     assert resolve_api_window_bounds(
         "2026-03-17T03",
         "2026-03-17T04",
@@ -77,7 +85,9 @@ def test_resolve_api_window_bounds_extends_current_day_end_for_region_forecast()
     ) == ("2026-03-17T03", "2026-03-17T23")
 
 
-def test_resolve_api_window_bounds_preserves_multi_day_current_day_end_backfill_window() -> None:
+def test_resolve_api_window_bounds_preserves_multi_day_current_day_end_backfill_window() -> (
+    None
+):
     assert resolve_api_window_bounds(
         "2026-03-09T00",
         "2026-03-16T00",
@@ -86,7 +96,9 @@ def test_resolve_api_window_bounds_preserves_multi_day_current_day_end_backfill_
 
 
 def test_resolve_api_window_bounds_converts_monthly_window() -> None:
-    assert resolve_api_window_bounds("2026-02-01T00:00:00+00:00", "2026-03-01T00:00:00+00:00", "monthly") == (
+    assert resolve_api_window_bounds(
+        "2026-02-01T00:00:00+00:00", "2026-03-01T00:00:00+00:00", "monthly"
+    ) == (
         "2026-01-31",
         "2026-02-01",
     )
@@ -100,7 +112,12 @@ def test_resolve_api_window_bounds_rejects_empty_or_negative_window() -> None:
 def test_fetch_dataset_rows_paginates_until_total() -> None:
     session = FakeSession(
         responses=[
-            {"response": {"total": "3", "data": [{"period": "2026-01-01T00"}, {"period": "2026-01-01T01"}]}},
+            {
+                "response": {
+                    "total": "3",
+                    "data": [{"period": "2026-01-01T00"}, {"period": "2026-01-01T01"}],
+                }
+            },
             {"response": {"total": "3", "data": [{"period": "2026-01-01T02"}]}},
         ]
     )
@@ -154,7 +171,9 @@ def test_build_event_envelope_uses_deterministic_event_id() -> None:
         source_window_start="2026-03-01T00",
         source_window_end="2026-03-01T23",
     )
-    second_event = build_event("electricity_region_data", "electricity/rto/region-data", row)
+    second_event = build_event(
+        "electricity_region_data", "electricity/rto/region-data", row
+    )
     assert first_event["dataset"] == "electricity_region_data"
     assert first_event["metadata"]["route"] == "electricity/rto/region-data"
     assert first_event["metadata"]["ingestion_run_id"] == "fetch_1"
@@ -162,12 +181,18 @@ def test_build_event_envelope_uses_deterministic_event_id() -> None:
     assert first_event["metadata"]["source_window_end"] == "2026-03-01T23"
     assert first_event["payload"]["value"] == "100"
     assert first_event["event_id"] == second_event["event_id"]
-    assert first_event["event_id"] == build_event_id("electricity_region_data", "electricity/rto/region-data", row)
+    assert first_event["event_id"] == build_event_id(
+        "electricity_region_data", "electricity/rto/region-data", row
+    )
 
 
 def test_build_event_rejects_invalid_period() -> None:
     with pytest.raises(ValueError):
-        build_event("electricity_region_data", "electricity/rto/region-data", {"period": "not-a-date"})
+        build_event(
+            "electricity_region_data",
+            "electricity/rto/region-data",
+            {"period": "not-a-date"},
+        )
 
 
 def test_build_event_accepts_monthly_period() -> None:

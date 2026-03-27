@@ -1,7 +1,7 @@
 datasets:
   - id: electricity_generation_hourly
     name: "Electricity Generation by Source (Hourly)"
-    kafka_topic: "eia.electricity.generation"
+    snowflake_table: ELECTRICITY_GENERATION_RAW   # written to SNOWFLAKE_DATABASE.SNOWFLAKE_SCHEMA
     eia_route: "electricity/rto/fuel-type-data"
     frequency: "hourly"
     rolling_days: 7
@@ -22,8 +22,8 @@ datasets:
           direction: desc
       length: 500
     schema:
-      period: string       # e.g. "2024-01-01T00"
-      respondent: string   # Balancing authority
+      period: string             # e.g. "2024-01-01T00"
+      respondent: string         # Balancing authority code
       respondent-name: string
       fueltype: string
       type-name: string
@@ -32,7 +32,7 @@ datasets:
 
   - id: electricity_demand_hourly
     name: "Electricity Demand by Region (Hourly)"
-    kafka_topic: "eia.electricity.demand"
+    snowflake_table: ELECTRICITY_DEMAND_RAW        # written to SNOWFLAKE_DATABASE.SNOWFLAKE_SCHEMA
     eia_route: "electricity/rto/region-data"
     frequency: "hourly"
     rolling_days: 7

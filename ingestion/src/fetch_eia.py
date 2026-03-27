@@ -1,28 +1,30 @@
 """
 fetch_eia.py
-------------
-Fetches electricity generation and demand data from the EIA Open Data API v2
-and publishes each record to the appropriate Kafka topic defined in
-dataset_registry.yml.
+============
+Fetches electricity data from the EIA Open Data API v2 and writes each
+record directly to a Snowflake raw table via a Snowpark Session.
 
-Called by the Airflow DAGs via BashOperator or PythonOperator.
+Kafka is no longer involved.  The raw records land in Snowflake immediately;
+the silver Spark job reads from Snowflake instead of a MinIO bronze bucket.
 
-DATE WINDOW MODES (checked in this priority order):
-    1. Backfill mode   — set BACKFILL_START_DATE + BACKFILL_END_DATE env vars
-                         e.g. BACKFILL_START_DATE=2024-01-01 BACKFILL_END_DATE=2024-01-31
-    2. Override mode   — set ROLLING_DAYS_OVERRIDE env var to a float
-                         e.g. ROLLING_DAYS_OVERRIDE=0.083 for ~2 hours
-    3. Registry mode   — uses rolling_days from dataset_registry.yml (default: 7 days)
+DATE WINDOW MODES (checked in priority order)
+---------------------------------------------
+1. Backfill env vars  — BACKFILL_START_DATE + BACKFILL_END_DATE
+                        e.g. BACKFILL_START_DATE=2024-01-01 BACKFILL_END_DATE=2024-01-31
+2. Rolling hours      — ROLLING_HOURS env var (float hours to look back)
+                        e.g. ROLLING_HOURS=48
+3. Registry default   — rolling_days from dataset_registry.yml
 
-Environment variables required:
-    EIA_API_KEY            - Your EIA API key
-    KAFKA_BROKER           - e.g. "kafka:9092"
+DATASET SELECTION
+-----------------
+TARGET_DATASET_ID  — when set, only that one dataset is fetched.
+                     The eia_ingest Airflow DAG sets this per task.
+                     Unset → all datasets in the registry are fetched.
 
-Optional:
-    BACKFILL_START_DATE    - ISO date string "YYYY-MM-DD"
-    BACKFILL_END_DATE      - ISO date string "YYYY-MM-DD"
-    ROLLING_DAYS_OVERRIDE  - float, overrides registry rolling_days for this run
+Required env vars:  EIA_API_KEY  +  all SNOWFLAKE_* vars (see publish_snowflake.py)
 """
+
+from __future__ import annotations
 
 import logging
 import os
@@ -34,7 +36,7 @@ from typing import Any
 import requests
 import yaml
 
-from publish_kafka import close_producer, get_producer, publish_records
+from publish_snowflake import close_session, get_session, write_records
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,60 +47,58 @@ logger = logging.getLogger(__name__)
 EIA_BASE_URL  = "https://api.eia.gov/v2"
 REGISTRY_PATH = Path(__file__).parent / "dataset_registry.yml"
 MAX_RETRIES   = 3
-RETRY_BACKOFF = 2  # seconds
+RETRY_BACKOFF = 2  # seconds, exponential
 
+
+# ── Registry ───────────────────────────────────────────────────────────────────
 
 def load_registry() -> list[dict]:
-    with open(REGISTRY_PATH) as f:
-        registry = yaml.safe_load(f)
-    return registry.get("datasets", [])
+    with open(REGISTRY_PATH) as fh:
+        return yaml.safe_load(fh).get("datasets", [])
 
 
-def get_date_window(rolling_days: float) -> tuple[str, str]:
-    """Return (start, end) EIA-format datetime strings for a rolling window."""
-    now   = datetime.now(timezone.utc)
-    start = now - timedelta(days=rolling_days)
-    return start.strftime("%Y-%m-%dT%H"), now.strftime("%Y-%m-%dT%H")
+# ── Date window resolution ─────────────────────────────────────────────────────
+
+def _fmt(dt: datetime) -> str:
+    """EIA v2 hourly format: YYYY-MM-DDTHH"""
+    return dt.strftime("%Y-%m-%dT%H")
 
 
 def get_backfill_window() -> tuple[str, str] | None:
-    """
-    Return (start, end) from BACKFILL_START_DATE / BACKFILL_END_DATE env vars,
-    or None if not set.
-    """
-    start_env = os.environ.get("BACKFILL_START_DATE", "").strip()
-    end_env   = os.environ.get("BACKFILL_END_DATE",   "").strip()
-    if start_env and end_env:
-        # EIA v2 hourly format — start at midnight, end at 23:00
-        start_str = f"{start_env}T00"
-        end_str   = f"{end_env}T23"
-        logger.info("Backfill mode: %s → %s", start_str, end_str)
-        return start_str, end_str
+    start = os.environ.get("BACKFILL_START_DATE", "").strip()
+    end   = os.environ.get("BACKFILL_END_DATE",   "").strip()
+    if start and end:
+        logger.info("Backfill mode: %sT00 -> %sT23", start, end)
+        return f"{start}T00", f"{end}T23"
     return None
 
 
-def resolve_date_window(rolling_days: float) -> tuple[str, str]:
-    """
-    Resolve the date window to use for this run, checking env var overrides
-    before falling back to the registry rolling_days value.
-    """
-    # 1. Explicit backfill window
-    backfill = get_backfill_window()
-    if backfill:
-        return backfill
-
-    # 2. Rolling days override (used by hourly DAG: ROLLING_DAYS_OVERRIDE=0.083)
-    override = os.environ.get("ROLLING_DAYS_OVERRIDE", "").strip()
-    if override:
-        days = float(override)
-        logger.info("Rolling days override: %.4f days (~%d hours)", days, int(days * 24))
-        return get_date_window(days)
-
-    # 3. Registry default
-    return get_date_window(rolling_days)
+def get_rolling_window(hours: float) -> tuple[str, str]:
+    now   = datetime.now(timezone.utc)
+    start = now - timedelta(hours=hours)
+    return _fmt(start), _fmt(now)
 
 
-def fetch_dataset(
+def resolve_date_window(dataset: dict) -> tuple[str, str]:
+    """Return (start, end) using priority resolution for this dataset."""
+    bw = get_backfill_window()
+    if bw:
+        return bw
+
+    rolling_hours_env = os.environ.get("ROLLING_HOURS", "").strip()
+    if rolling_hours_env:
+        hours = float(rolling_hours_env)
+        logger.info("ROLLING_HOURS override: %.2f h", hours)
+        return get_rolling_window(hours)
+
+    rolling_days = float(dataset.get("rolling_days", 7))
+    logger.info("Registry default: %.1f days", rolling_days)
+    return get_rolling_window(rolling_days * 24)
+
+
+# ── EIA API ────────────────────────────────────────────────────────────────────
+
+def fetch_page(
     api_key: str,
     route: str,
     params: dict[str, Any],
@@ -106,19 +106,15 @@ def fetch_dataset(
     end: str,
     offset: int = 0,
 ) -> list[dict]:
-    """
-    Fetch one page of data from the EIA v2 API within the given date window.
-    Returns the list of data rows, or an empty list on failure.
-    """
-    url = f"{EIA_BASE_URL}/{route}/data/"
+    """Fetch one page from the EIA v2 API.  Returns [] on unrecoverable failure."""
+    url: str = f"{EIA_BASE_URL}/{route}/data/"
     query: dict[str, Any] = {
         "api_key": api_key,
-        "offset": offset,
-        "start": start,
-        "end": end,
+        "offset":  offset,
+        "start":   start,
+        "end":     end,
     }
 
-    # Flatten nested param structure into EIA v2 query format
     for key, value in params.items():
         if key == "data":
             for col in value:
@@ -134,25 +130,19 @@ def fetch_dataset(
         else:
             query[key] = value
 
-    logger.info("Requesting URL: %s", url)
-    logger.info("Query params: %s", {k: v for k, v in query.items() if k != "api_key"})
+    logger.info("GET %s  offset=%d  window=%s->%s", url, offset, start, end)
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             resp = requests.get(url, params=query, timeout=30)
-            if not resp.ok:
-                logger.error("EIA API error %d: %s", resp.status_code, resp.text[:500])
             resp.raise_for_status()
             payload = resp.json()
-            data  = payload.get("response", {}).get("data", [])
-            total = int(payload.get("response", {}).get("total", len(data)))
-            logger.info(
-                "Fetched %d records from %s (offset=%d, total=%d)",
-                len(data), route, offset, total,
-            )
+            data    = payload.get("response", {}).get("data", [])
+            total   = int(payload.get("response", {}).get("total", len(data)))
+            logger.info("  -> %d records (total reported: %d)", len(data), total)
             return data
         except requests.RequestException as exc:
-            logger.warning("Attempt %d/%d failed for %s: %s", attempt, MAX_RETRIES, route, exc)
+            logger.warning("Attempt %d/%d failed: %s", attempt, MAX_RETRIES, exc)
             if attempt < MAX_RETRIES:
                 time.sleep(RETRY_BACKOFF ** attempt)
 
@@ -160,55 +150,28 @@ def fetch_dataset(
     return []
 
 
-
-def get_monthly_window(rolling_months: int) -> tuple[str, str]:
-    """Return (start, end) date strings for a monthly rolling window."""
-    from datetime import date
-    today = datetime.now(timezone.utc).date()
-    end_month   = today.replace(day=1)
-    # Go back rolling_months months
-    year  = end_month.year - (rolling_months // 12)
-    month = end_month.month - (rolling_months % 12)
-    if month <= 0:
-        month += 12
-        year  -= 1
-    start_month = date(year, month, 1)
-    return str(start_month), str(today)
-
-
 def fetch_all_pages(api_key: str, dataset: dict) -> list[dict]:
-    """Paginate through all results for a dataset within its resolved date window."""
-    route      = dataset["eia_route"]
-    params     = dataset.get("params", {})
-    page_size  = params.get("length", 500)
-    frequency  = dataset.get("frequency", "hourly")
-
-    if frequency == "monthly":
-        rolling_months = dataset.get("rolling_months", 24)
-        backfill = get_backfill_window()
-        if backfill:
-            start, end = backfill
-        else:
-            start, end = get_monthly_window(rolling_months)
-    else:
-        rolling_days = dataset.get("rolling_days", 7)
-        start, end = resolve_date_window(rolling_days)
+    """Paginate through all results for one dataset within its date window."""
+    route     = dataset["eia_route"]
+    params    = dataset.get("params", {})
+    page_size = int(params.get("length", 500))
+    start, end = resolve_date_window(dataset)
 
     logger.info(
-        "Fetching dataset '%s' from %s to %s",
-        dataset["id"], start, end,
+        "Dataset '%s'  table=%s  window: %s -> %s",
+        dataset["id"], dataset.get("snowflake_table", "?"), start, end,
     )
 
     all_records: list[dict] = []
     offset = 0
-
     while True:
-        records = fetch_dataset(api_key, route, params, start, end, offset=offset)
+        records = fetch_page(api_key, route, params, start, end, offset)
         if not records:
             break
+        ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         for rec in records:
             rec["_dataset_id"] = dataset["id"]
-            rec["_fetched_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            rec["_fetched_at"] = ts
         all_records.extend(records)
         if len(records) < page_size:
             break
@@ -217,46 +180,56 @@ def fetch_all_pages(api_key: str, dataset: dict) -> list[dict]:
     return all_records
 
 
+# ── Main ───────────────────────────────────────────────────────────────────────
+
 def run() -> None:
     api_key  = os.environ["EIA_API_KEY"]
-    datasets = load_registry()
-    producer = get_producer()
+    registry = load_registry()
 
-    # SALES_ONLY=true  → only monthly datasets (used by eia_sales_pipeline DAG)
-    # SALES_ONLY unset → only hourly datasets  (used by eia_hourly_pipeline DAG)
-    # (backfill DAGs set the appropriate env var for their dataset type)
-    sales_only = os.environ.get("SALES_ONLY", "").lower() == "true"
-    target_frequency = "monthly" if sales_only else "hourly"
+    # ── Dataset selection ─────────────────────────────────────────────────────
+    target_id = os.environ.get("TARGET_DATASET_ID", "").strip()
+    if target_id:
+        datasets = [d for d in registry if d["id"] == target_id]
+        if not datasets:
+            raise ValueError(
+                f"TARGET_DATASET_ID='{target_id}' not found in registry. "
+                f"Known: {[d['id'] for d in registry]}"
+            )
+        logger.info("Single-dataset mode: %s", target_id)
+    else:
+        # Manual / legacy: run all hourly datasets
+        datasets = [d for d in registry if d.get("frequency", "hourly") == "hourly"]
+        logger.info("All-hourly mode: %d datasets", len(datasets))
 
-    filtered = [d for d in datasets if d.get("frequency", "hourly") == target_frequency]
-    logger.info(
-        "Running in %s mode — %d datasets selected",
-        target_frequency, len(filtered),
-    )
+    # ── Open one shared Snowpark session for all datasets this run ────────────
+    session = get_session()
+    total_written = 0
 
-    total_published = 0
+    try:
+        for dataset in datasets:
+            snowflake_table = dataset.get("snowflake_table")
+            if not snowflake_table:
+                logger.warning(
+                    "Dataset '%s' has no 'snowflake_table' in registry -- skipping.",
+                    dataset["id"],
+                )
+                continue
 
-    for dataset in filtered:
-        dataset_id = dataset["id"]
-        topic      = dataset["kafka_topic"]
-        logger.info("Processing dataset: %s -> topic: %s", dataset_id, topic)
+            records = fetch_all_pages(api_key, dataset)
+            if not records:
+                logger.warning("No records fetched for '%s'.", dataset["id"])
+                continue
 
-        records = fetch_all_pages(api_key, dataset)
-        if not records:
-            logger.warning("No records fetched for dataset: %s", dataset_id)
-            continue
+            written = write_records(session, snowflake_table, records)
+            total_written += written
+            logger.info(
+                "Dataset '%s': %d rows written -> %s",
+                dataset["id"], written, snowflake_table,
+            )
+    finally:
+        close_session(session)
 
-        published = publish_records(
-            producer=producer,
-            topic=topic,
-            records=records,
-            key_field="period",
-        )
-        total_published += published
-        logger.info("Dataset %s: %d records published.", dataset_id, published)
-
-    close_producer(producer)
-    logger.info("Ingestion complete. Total records published: %d", total_published)
+    logger.info("Ingestion complete. Total rows written to Snowflake: %d", total_written)
 
 
 if __name__ == "__main__":

@@ -154,6 +154,7 @@ services:
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./ingestion/src:/opt/airflow/ingestion/src
+      - ./spark/jobs:/opt/airflow/spark/jobs
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health > /dev/null"]

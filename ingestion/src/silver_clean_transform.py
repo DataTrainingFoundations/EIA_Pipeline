@@ -43,23 +43,35 @@ import argparse
 import logging
 import os
 
-from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import (
+# from pyspark.sql import DataFrame, SparkSession
+# from pyspark.sql.functions import (
+#     col,
+#     current_timestamp,
+#     to_timestamp,
+#     trim,
+#     upper,
+#     when,
+# )
+
+from snowflake.snowpark import Session
+from snowflake.snowpark.functions import (
     col,
     current_timestamp,
     to_timestamp,
     trim,
     upper,
     when,
+    concat,
+    lit
 )
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://minio:9000")
-MINIO_USER     = os.environ.get("MINIO_ROOT_USER", "minioadmin")
-MINIO_PASSWORD = os.environ.get("MINIO_ROOT_PASSWORD", "minioadmin")
+# MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://minio:9000")
+# MINIO_USER     = os.environ.get("MINIO_ROOT_USER", "minioadmin")
+# MINIO_PASSWORD = os.environ.get("MINIO_ROOT_PASSWORD", "minioadmin")
 
 SF_URL      = os.environ.get("SNOWFLAKE_URL", "")
 SF_USER     = os.environ.get("SNOWFLAKE_USER", "")
@@ -84,60 +96,78 @@ DEDUP_COLS = {
 
 # ── Spark session ──────────────────────────────────────────────────────────────
 
-def _build_spark(app_name: str) -> SparkSession:
-    return (
-        SparkSession.builder
-        .appName(app_name)
-        .master(os.environ.get("SPARK_MASTER", "spark://spark-master:7077"))
-        .config(
-            "spark.jars.packages",
-            "org.apache.hadoop:hadoop-aws:3.4.2,"
-            "com.amazonaws:aws-java-sdk-bundle:1.12.262,"
-            "net.snowflake:snowflake-jdbc:3.16.1,"
-            "net.snowflake:spark-snowflake_2.13:2.16.0-spark_3.4",
-        )
-        # MinIO / S3A
-        .config("spark.hadoop.fs.s3a.endpoint", MINIO_ENDPOINT)
-        .config("spark.hadoop.fs.s3a.access.key", MINIO_USER)
-        .config("spark.hadoop.fs.s3a.secret.key", MINIO_PASSWORD)
-        .config("spark.hadoop.fs.s3a.path.style.access", "true")
-        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-        .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
-        .getOrCreate()
+# def _build_spark(app_name: str) -> SparkSession:
+#     return (
+#         SparkSession.builder
+#         .appName(app_name)
+#         .master(os.environ.get("SPARK_MASTER", "spark://spark-master:7077"))
+#         .config(
+#             "spark.jars.packages",
+#             "org.apache.hadoop:hadoop-aws:3.4.2,"
+#             "com.amazonaws:aws-java-sdk-bundle:1.12.262,"
+#             "net.snowflake:snowflake-jdbc:3.16.1,"
+#             "net.snowflake:spark-snowflake_2.13:2.16.0-spark_3.4",
+#         )
+#         # MinIO / S3A
+#         .config("spark.hadoop.fs.s3a.endpoint", MINIO_ENDPOINT)
+#         .config("spark.hadoop.fs.s3a.access.key", MINIO_USER)
+#         .config("spark.hadoop.fs.s3a.secret.key", MINIO_PASSWORD)
+#         .config("spark.hadoop.fs.s3a.path.style.access", "true")
+#         .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+#         .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
+#         .getOrCreate()
+#     )
+
+def _build_snowpark():
+    connection_params = {
+        "account":   os.environ["SNOWFLAKE_ACCOUNT"],
+        "user":      os.environ["SNOWFLAKE_USER"],
+        "password":  os.environ["SNOWFLAKE_PASSWORD"],
+        "role":      os.environ.get("SNOWFLAKE_ROLE",      "SYSADMIN"),
+        "warehouse": os.environ.get("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
+        "database":  os.environ.get("SNOWFLAKE_DATABASE",  "EIA"),
+        "schema":    os.environ.get("SNOWFLAKE_SCHEMA",    "RAW"),
+    }
+    session = Session.builder.configs(connection_params).create()
+    logger.info(
+        "Snowpark session opened → %s.%s",
+        connection_params["database"],
+        connection_params["schema"],
     )
+    return session
 
 
 # ── Snowflake reader ───────────────────────────────────────────────────────────
 
-def _read_snowflake(spark: SparkSession, table: str, date: str) -> DataFrame:
+def _read_snowflake(snowpark, table: str, date: str) -> DataFrame:
     """
     Read raw rows from Snowflake for the given date using the Spark connector.
     Filters to rows fetched on `date` so each silver run is idempotent.
     """
-    sf_options = {
-        "sfURL":       SF_URL,
-        "sfUser":      SF_USER,
-        "sfPassword":  SF_PASSWORD,
-        "sfRole":      SF_ROLE,
-        "sfWarehouse": SF_WH,
-        "sfDatabase":  SF_DB,
-        "sfSchema":    SF_SCHEMA,
-        "dbtable":     table,
-    }
+    # sf_options = {
+    #     "sfURL":       SF_URL,
+    #     "sfUser":      SF_USER,
+    #     "sfPassword":  SF_PASSWORD,
+    #     "sfRole":      SF_ROLE,
+    #     "sfWarehouse": SF_WH,
+    #     "sfDatabase":  SF_DB,
+    #     "sfSchema":    SF_SCHEMA,
+    #     "dbtable":     table,
+    # }
 
     logger.info("Reading from Snowflake: %s.%s.%s  (date=%s)", SF_DB, SF_SCHEMA, table, date)
 
     df = (
-        spark.read
-        .format("net.snowflake.spark.snowflake")
-        .options(**sf_options)
-        .load()
-        # Filter to just the rows ingested on the target date
+        snowpark.table(table)
+        # .format("net.snowflake.spark.snowflake")
+        # .options(**sf_options)
+        # .load()
+        # # Filter to just the rows ingested on the target date
         .filter(f"TRY_TO_DATE(_FETCHED_AT) = '{date}'")
     )
 
-    count = df.count()
-    logger.info("Rows read from Snowflake %s: %d", table, count)
+    #count = df.count()
+    #logger.info("Rows read from Snowflake %s: %d", table, count)
     return df
 
 
@@ -155,8 +185,8 @@ def _clean_generation(df: DataFrame) -> DataFrame:
         .withColumnRenamed("TYPE_NAME",       "fuel_type_name")
         .withColumnRenamed("VALUE_UNITS",     "units")
         .withColumn(
-            "period_ts",
-            to_timestamp(col("PERIOD"), "yyyy-MM-dd'T'HH"),
+            "PERIOD_TS",
+            to_timestamp(concat(col("period"), lit(":00:00")))
         )
         .withColumn(
             "value_gwh",
@@ -182,8 +212,8 @@ def _clean_demand(df: DataFrame) -> DataFrame:
         .withColumnRenamed("TYPE_NAME",       "demand_type_name")
         .withColumnRenamed("VALUE_UNITS",     "units")
         .withColumn(
-            "period_ts",
-            to_timestamp(col("PERIOD"), "yyyy-MM-dd'T'HH"),
+            "PERIOD_TS",
+            to_timestamp(concat(col("period"), lit(":00:00")))
         )
         .withColumn(
             "value_gwh",
@@ -207,13 +237,14 @@ def run(dataset: str, date: str) -> None:
 
     sf_table    = DATASET_TABLE_MAP[dataset]
     dedup_cols  = DEDUP_COLS[dataset]
-    silver_path = f"s3a://silver/eia/{dataset}/date={date}"
-    app_name    = f"silver_{dataset}_{date}"
+    #silver_path = f"s3a://silver/eia/{dataset}/date={date}"
+    silver_table = f"SILVER_{dataset.upper()}"
+    #app_name    = f"silver_{dataset}_{date}"
 
-    spark = _build_spark(app_name)
+    snowpark = _build_snowpark()
 
     # ── Read from Snowflake ───────────────────────────────────────────────────
-    raw_df = _read_snowflake(spark, sf_table, date)
+    raw_df = _read_snowflake(snowpark, sf_table, date)
 
     # ── Clean ─────────────────────────────────────────────────────────────────
     if dataset == "electricity_generation":
@@ -230,18 +261,22 @@ def run(dataset: str, date: str) -> None:
     silver_df = dedup_df.withColumn("silver_processed_at", current_timestamp())
 
     record_count = silver_df.count()
-    logger.info("Writing %d clean records to %s", record_count, silver_path)
+    logger.info("Writing %d clean records to %s", record_count, silver_table)
+
+    # (
+    #     silver_df.write
+    #     .mode("overwrite")
+    #     .format("parquet")
+    #     .option("compression", "snappy")
+    #     .save(silver_path)
+    # )
 
     (
-        silver_df.write
-        .mode("overwrite")
-        .format("parquet")
-        .option("compression", "snappy")
-        .save(silver_path)
+        silver_df.write.mode("overwrite").save_as_table(f"{SF_DB}.SILVER.{silver_table}")
     )
 
-    logger.info("Silver write complete -> %s", silver_path)
-    spark.stop()
+    logger.info("Silver write complete -> %s", silver_table)
+    snowpark.close()
 
 
 if __name__ == "__main__":

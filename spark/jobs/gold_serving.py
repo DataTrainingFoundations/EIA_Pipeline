@@ -43,8 +43,21 @@ import argparse
 import logging
 import os
 
-from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import (
+# from pyspark.sql import DataFrame, SparkSession
+# from pyspark.sql.functions import (
+#     col,
+#     concat_ws,
+#     current_timestamp,
+#     lit,
+#     max as spark_max,
+#     md5,
+#     round as spark_round,
+#     sum as spark_sum,
+#     to_date,
+# )
+
+from snowflake.snowpark import Session
+from snowflake.snowpark.functions import (
     col,
     concat_ws,
     current_timestamp,
@@ -60,11 +73,11 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://minio:9000")
-MINIO_USER     = os.environ.get("MINIO_ROOT_USER", "minioadmin")
-MINIO_PASSWORD = os.environ.get("MINIO_ROOT_PASSWORD", "minioadmin")
+# MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://minio:9000")
+# MINIO_USER     = os.environ.get("MINIO_ROOT_USER", "minioadmin")
+# MINIO_PASSWORD = os.environ.get("MINIO_ROOT_PASSWORD", "minioadmin")
 
-GOLD_BASE = "s3a://gold/eia"
+# GOLD_BASE = "s3a://gold/eia"
 
 
 # ── Spark session ──────────────────────────────────────────────────────────────

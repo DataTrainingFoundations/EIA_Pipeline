@@ -4,20 +4,20 @@ eia_silver.py
 DAG: eia_silver
 ---------------
 Watches Snowflake RAW tables for new data and, when rows are present for the
-target date, runs the silver clean/validate/deduplicate Spark job per dataset.
+target date, runs the silver clean/validate/deduplicate job per dataset.
 
 HOW IT WORKS
 ------------
 A PythonSensor per dataset queries the Snowflake raw table for rows where
 _FETCHED_AT falls on the target date.  When rows are found the corresponding
-silver Spark job fires:
+silver job fires as a plain Python subprocess (no Spark):
 
-    silver_clean_transform.py --dataset <dataset_id> --date <date>
+    python silver_clean_transform.py --dataset <dataset_id> --date <date>
 
-The Spark job reads raw rows directly from Snowflake (via the Snowflake Spark
-Connector), cleans and deduplicates them, then writes clean Parquet to:
+The script uses a Snowpark Session to read from the RAW table, clean and
+deduplicate the records, then write results to a SILVER table:
 
-    s3a://silver/eia/<dataset_id>/date=<date>/
+    <SNOWFLAKE_DATABASE>.SILVER.SILVER_<DATASET>
 
 TRIGGERING
 ----------
@@ -33,8 +33,7 @@ SENSOR BEHAVIOUR
 ENVIRONMENT VARIABLES
 ---------------------
 SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PASSWORD,
-SNOWFLAKE_ROLE, SNOWFLAKE_WAREHOUSE, SNOWFLAKE_DATABASE, SNOWFLAKE_SCHEMA,
-MINIO_ENDPOINT, MINIO_ROOT_USER, MINIO_ROOT_PASSWORD
+SNOWFLAKE_ROLE, SNOWFLAKE_WAREHOUSE, SNOWFLAKE_DATABASE, SNOWFLAKE_SCHEMA
 """
 
 from __future__ import annotations
@@ -51,21 +50,8 @@ from airflow.sensors.python import PythonSensor
 from airflow.utils.dates import days_ago
 
 # ── Environment ────────────────────────────────────────────────────────────────
-MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT",     "http://minio:9000")
-MINIO_USER     = os.environ.get("MINIO_ROOT_USER",    "minioadmin")
-MINIO_PASSWORD = os.environ.get("MINIO_ROOT_PASSWORD","minioadmin")
-
-REGISTRY_PATH  = Path("/opt/airflow/ingestion/src/dataset_registry.yml")
-
-SPARK_MASTER   = "spark://spark-master:7077"
-SPARK_PACKAGES = (
-    "org.apache.hadoop:hadoop-aws:3.4.2,"
-    "com.amazonaws:aws-java-sdk-bundle:1.12.262,"
-    # Snowflake Spark connector — reads directly from Snowflake in Spark jobs
-    "net.snowflake:snowflake-jdbc:3.16.1,"
-    "net.snowflake:spark-snowflake_2.13:2.16.0-spark_3.4"
-)
-SPARK_JOBS_DIR = "/opt/spark/jobs"
+REGISTRY_PATH = Path("/opt/airflow/ingestion/src/dataset_registry.yml")
+SILVER_SRC    = "/opt/airflow/ingestion/src"
 
 _SNOWFLAKE_ENV_KEYS = [
     "SNOWFLAKE_ACCOUNT",
@@ -147,63 +133,34 @@ def _snowflake_rows_exist(dataset_id: str, **context) -> bool:
 
 def _run_silver(dataset_id: str, **context) -> None:
     """
-    Run silver_clean_transform.py for one dataset.
-    The Spark job reads from Snowflake and writes clean Parquet to MinIO silver/.
+    Run silver_clean_transform.py for one dataset as a plain Python subprocess.
+    Snowpark opens its own session inside the script — no Spark, no MinIO.
     """
     target_date = _resolve_date(context)
 
-    # Strip frequency suffix for the Spark --dataset arg
-    spark_dataset = dataset_id.replace("_hourly", "").replace("_monthly", "")
+    # Strip frequency suffix to match the --dataset choices in the script
+    dataset_arg = dataset_id.replace("_hourly", "").replace("_monthly", "")
 
-    sf_url = (
-        f"{os.environ.get('SNOWFLAKE_ACCOUNT', '')}.snowflakecomputing.com"
-    )
+    env = {
+        **os.environ,
+        **{k: os.environ.get(k, "") for k in _SNOWFLAKE_ENV_KEYS},
+    }
 
-    env_str = (
-        f"MINIO_ENDPOINT={MINIO_ENDPOINT} "
-        f"MINIO_ROOT_USER={MINIO_USER} "
-        f"MINIO_ROOT_PASSWORD={MINIO_PASSWORD} "
-        f"SPARK_MASTER={SPARK_MASTER} "
-        # Snowflake vars for the Spark connector
-        f"SNOWFLAKE_URL={sf_url} "
-        + " ".join(
-            f"{k}={os.environ.get(k, '')}"
-            for k in _SNOWFLAKE_ENV_KEYS
-        )
-        + " "
+    print(f"[silver] Running {dataset_arg} for {target_date}")
+    result = subprocess.run(
+        ["python", "silver_clean_transform.py", "--dataset", dataset_arg, "--date", target_date],
+        cwd=SILVER_SRC,
+        env=env,
+        capture_output=True,
+        text=True,
     )
-
-    submit_cmd = (
-        f"mkdir -p /tmp/ivy2 && "
-        f"/opt/spark/bin/spark-submit "
-        f"--master {SPARK_MASTER} "
-        f"--packages {SPARK_PACKAGES} "
-        f"--conf spark.jars.ivy=/tmp/ivy2 "
-        f"--conf spark.hadoop.fs.s3a.endpoint={MINIO_ENDPOINT} "
-        f"--conf spark.hadoop.fs.s3a.access.key={MINIO_USER} "
-        f"--conf spark.hadoop.fs.s3a.secret.key={MINIO_PASSWORD} "
-        f"--conf spark.hadoop.fs.s3a.path.style.access=true "
-        f"--conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem "
-        f"--conf spark.hadoop.fs.s3a.connection.ssl.enabled=false "
-        f"--conf spark.hadoop.fs.s3a.aws.credentials.provider="
-        f"org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider "
-        f"{SPARK_JOBS_DIR}/silver_clean_transform.py "
-        f"--dataset {spark_dataset} --date {target_date}"
-    )
-    full_cmd = (
-        f"docker exec $(docker ps -qf name=spark-master) "
-        f"bash -c '{env_str}{submit_cmd}'"
-    )
-
-    print(f"[silver] {spark_dataset} for {target_date}")
-    result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True)
     print(result.stdout)
     if result.returncode != 0:
         print(result.stderr)
         raise RuntimeError(
-            f"Silver job failed for '{spark_dataset}' on {target_date}:\n{result.stderr}"
+            f"Silver job failed for '{dataset_arg}' on {target_date}:\n{result.stderr}"
         )
-    print(f"[silver] Done -> s3a://silver/eia/{spark_dataset}/date={target_date}/")
+    print(f"[silver] Done: {dataset_arg} -> Snowflake SILVER table")
 
 
 # ── DAG ────────────────────────────────────────────────────────────────────────
@@ -220,7 +177,7 @@ with DAG(
     dag_id="eia_silver",
     description=(
         "Sense new rows in Snowflake RAW tables and run silver "
-        "clean/validate Spark jobs per dataset, writing Parquet to MinIO silver/."
+        "clean/validate Snowpark jobs per dataset, writing to Snowflake SILVER tables."
     ),
     schedule_interval="*/30 * * * *",
     start_date=days_ago(1),
@@ -256,9 +213,9 @@ with DAG(
             python_callable=_run_silver,
             op_kwargs={"dataset_id": ds_id},
             doc_md=(
-                f"Run silver_clean_transform.py for `{ds_id}`: "
-                f"read from Snowflake, clean, write Parquet to "
-                f"`s3a://silver/eia/{ds_id.replace('_hourly','')}/date=<date>/`."
+                f"Run silver_clean_transform.py for `{ds_id}` via Snowpark: "
+                f"read from `{ds.get('snowflake_table', '?')}`, clean and deduplicate, "
+                f"write to `<SNOWFLAKE_DATABASE>.SILVER.SILVER_{ds_id.replace('_hourly','').upper()}`."
             ),
         )
 

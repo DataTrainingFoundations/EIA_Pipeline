@@ -30,7 +30,7 @@ except Exception as exc:
 
 # ── Persona cards ─────────────────────────────────────────────────────────────
 st.subheader("Dashboards")
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 
 col1.markdown("""
 **Generation Mix Monitor**
@@ -44,11 +44,17 @@ col2.markdown("""
 Monitor hourly electricity demand vs day-ahead forecast per balancing authority.
 Surfaces regions with the largest forecast misses and tracks daily peak demand trends.
 """)
+col3.markdown("""
+**Monthly Sales Trends**
+Track monthly electricity sales, revenue, and pricing across states and sectors to identify 
+long-term consumption and growth trends. Highlights seasonal patterns, high-performing markets, and shifts in demand and price per kWh.
+""")
 
 if hasattr(st, "page_link"):
-    link1, link2 = st.columns(2)
+    link1, link2, link3 = st.columns(3)
     link1.page_link("pages/generation_mix_monitor.py",  label="→ Generation Mix Monitor")
     link2.page_link("pages/demand_forecast_tracker.py", label="→ Demand & Forecast Tracker")
+    link3.page_link("pages/monthly_sales_trends.py", label="→ Monthly Sales Trends")
 
 # ── Data coverage ─────────────────────────────────────────────────────────────
 st.subheader("Data coverage")

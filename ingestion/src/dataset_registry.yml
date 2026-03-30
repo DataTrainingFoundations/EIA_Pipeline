@@ -1,7 +1,7 @@
 datasets:
   - id: electricity_generation_hourly
     name: "Electricity Generation by Source (Hourly)"
-    snowflake_table: ELECTRICITY_GENERATION_RAW   # written to SNOWFLAKE_DATABASE.SNOWFLAKE_SCHEMA
+    snowflake_table: ELECTRICITY_GENERATION_BRONZE   # written to SNOWFLAKE_DATABASE.SNOWFLAKE_SCHEMA
     eia_route: "electricity/rto/fuel-type-data"
     frequency: "hourly"
     rolling_days: 7
@@ -32,7 +32,7 @@ datasets:
 
   - id: electricity_demand_hourly
     name: "Electricity Demand by Region (Hourly)"
-    snowflake_table: ELECTRICITY_DEMAND_RAW        # written to SNOWFLAKE_DATABASE.SNOWFLAKE_SCHEMA
+    snowflake_table: ELECTRICITY_DEMAND_BRONZE       # written to SNOWFLAKE_DATABASE.SNOWFLAKE_SCHEMA
     eia_route: "electricity/rto/region-data"
     frequency: "hourly"
     rolling_days: 7
@@ -56,3 +56,31 @@ datasets:
       type-name: string
       value: float
       value-units: string
+    
+  - id: electricity_retail_sales_monthly
+    name: "Electricity Retail Sales to Ultimate Customer (Monthly)"
+    snowflake_table: ELECTRICITY_RETAIL_SALES_BRONZE    # written to SNOWFLAKE_DATABASE.SNOWFLAKE_SCHEMA
+    eia_route: "electricity/retail-sales/data"
+    frequency: "monthly"
+    rolling_days: 30
+    params:
+      frequency: monthly
+      data:
+        - customers
+        - price
+        - revenue
+        - sales
+      facets: {}
+      sort:
+        - column: period
+          direction: desc
+      offset: 0
+      length: 5000
+    schema:
+      period: string         # e.g. "2024-01"
+      state: string          # State abbreviation
+      sector: string         # Sector name (Residential, Commercial, Industrial, etc.)
+      customers: float       # Number of customers
+      price: float           # Average price ($/kWh)
+      revenue: float         # Revenue ($)
+      sales: float           # Sales in MWh

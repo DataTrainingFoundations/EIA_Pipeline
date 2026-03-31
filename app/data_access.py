@@ -7,5 +7,6 @@ without scanning one large file.
 
 from data_access_grid import *  # noqa: F403
 from data_access_planning import *  # noqa: F403
+from data_access_power import *  # noqa: F403
 from data_access_shared import *  # noqa: F403
 from data_access_summary import *  # noqa: F403

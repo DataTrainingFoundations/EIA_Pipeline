@@ -117,6 +117,7 @@ POWER_OPERATIONS_MONTHLY_COLUMNS = [
     "consumption_for_eg_thousand_units",
     "ash_content_pct",
     "heat_content_btu_per_unit",
+    "cost_usd",
     "fuel_heat_input_mmbtu",
     "heat_rate_btu_per_kwh",
     "loaded_at",

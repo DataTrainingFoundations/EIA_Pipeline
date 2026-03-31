@@ -9,10 +9,19 @@ from jobs.gold_region_fuel_serving_hourly import (
     build_region_hourly_metrics,
     build_respondent_dimension,
 )
+from jobs.platinum_grid_operations_hourly import build_grid_operations_status
 from jobs.platinum_region_demand_daily import build_region_demand_daily
 from jobs.platinum_resource_planning_daily import build_resource_planning_daily
 from jobs.silver_clean_transform import clean_region_data, validate_non_empty
 from pyspark.sql.readwriter import DataFrameReader, DataFrameWriter
+from pyspark.sql.types import (
+    DateType,
+    DoubleType,
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
+)
 
 
 def _capture_writer_calls(
@@ -616,6 +625,134 @@ def test_region_demand_daily_aggregates_hourly_curated_gold_rows(spark_session) 
     assert rows[0]["daily_demand_mwh"] == 300.0
     assert rows[0]["avg_hourly_demand_mwh"] == 150.0
     assert rows[0]["peak_hourly_demand_mwh"] == 200.0
+
+
+def test_grid_operations_status_ignores_forecast_only_hours(spark_session) -> None:
+    region_schema = StructType(
+        [
+            StructField("period", TimestampType(), False),
+            StructField("respondent", StringType(), False),
+            StructField("respondent_name", StringType(), True),
+            StructField("actual_demand_mwh", DoubleType(), True),
+            StructField("day_ahead_forecast_mwh", DoubleType(), True),
+            StructField("forecast_error_mwh", DoubleType(), True),
+            StructField("forecast_error_pct", DoubleType(), True),
+            StructField("loaded_at", TimestampType(), True),
+            StructField("event_date", DateType(), True),
+        ]
+    )
+    region_df = spark_session.createDataFrame(
+        [
+            {
+                "period": datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
+                "respondent": "PJM",
+                "respondent_name": "PJM",
+                "actual_demand_mwh": 100.0,
+                "day_ahead_forecast_mwh": 95.0,
+                "forecast_error_mwh": 5.0,
+                "forecast_error_pct": 5.263158,
+                "loaded_at": datetime(2026, 1, 1, 0, 10, tzinfo=timezone.utc),
+                "event_date": datetime(2026, 1, 1, tzinfo=timezone.utc).date(),
+            },
+            {
+                "period": datetime(2026, 1, 1, 1, 0, tzinfo=timezone.utc),
+                "respondent": "PJM",
+                "respondent_name": "PJM",
+                "actual_demand_mwh": None,
+                "day_ahead_forecast_mwh": 110.0,
+                "forecast_error_mwh": None,
+                "forecast_error_pct": None,
+                "loaded_at": datetime(2026, 1, 1, 1, 10, tzinfo=timezone.utc),
+                "event_date": datetime(2026, 1, 1, tzinfo=timezone.utc).date(),
+            },
+        ],
+        schema=region_schema,
+    )
+    fuel_df = spark_session.createDataFrame(
+        [
+            {
+                "period": datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
+                "respondent": "PJM",
+                "respondent_name": "PJM",
+                "fueltype": "SUN",
+                "generation_mwh": 60.0,
+            },
+            {
+                "period": datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
+                "respondent": "PJM",
+                "respondent_name": "PJM",
+                "fueltype": "NG",
+                "generation_mwh": 40.0,
+            },
+            {
+                "period": datetime(2026, 1, 1, 1, 0, tzinfo=timezone.utc),
+                "respondent": "PJM",
+                "respondent_name": "PJM",
+                "fueltype": "NG",
+                "generation_mwh": 105.0,
+            },
+        ]
+    )
+
+    status_df, alerts_df = build_grid_operations_status(region_df, fuel_df)
+    status_rows = status_df.collect()
+
+    assert len(status_rows) == 1
+    assert status_rows[0]["actual_demand_mwh"] == 100.0
+    assert status_rows[0]["day_ahead_forecast_mwh"] == 95.0
+    assert status_rows[0]["coverage_ratio"] == 1.0
+    assert status_rows[0]["renewable_share_pct"] == 60.0
+    assert alerts_df.count() == 0
+
+
+def test_grid_operations_status_returns_empty_when_only_forecasts_exist(
+    spark_session,
+) -> None:
+    region_schema = StructType(
+        [
+            StructField("period", TimestampType(), False),
+            StructField("respondent", StringType(), False),
+            StructField("respondent_name", StringType(), True),
+            StructField("actual_demand_mwh", DoubleType(), True),
+            StructField("day_ahead_forecast_mwh", DoubleType(), True),
+            StructField("forecast_error_mwh", DoubleType(), True),
+            StructField("forecast_error_pct", DoubleType(), True),
+            StructField("loaded_at", TimestampType(), True),
+            StructField("event_date", DateType(), True),
+        ]
+    )
+    region_df = spark_session.createDataFrame(
+        [
+            {
+                "period": datetime(2026, 1, 1, 1, 0, tzinfo=timezone.utc),
+                "respondent": "PJM",
+                "respondent_name": "PJM",
+                "actual_demand_mwh": None,
+                "day_ahead_forecast_mwh": 110.0,
+                "forecast_error_mwh": None,
+                "forecast_error_pct": None,
+                "loaded_at": datetime(2026, 1, 1, 1, 10, tzinfo=timezone.utc),
+                "event_date": datetime(2026, 1, 1, tzinfo=timezone.utc).date(),
+            }
+        ],
+        schema=region_schema,
+    )
+    fuel_df = spark_session.createDataFrame(
+        [
+            {
+                "period": datetime(2026, 1, 1, 1, 0, tzinfo=timezone.utc),
+                "respondent": "PJM",
+                "respondent_name": "PJM",
+                "fueltype": "NG",
+                "generation_mwh": 105.0,
+            }
+        ]
+    )
+
+    status_df, alerts_df = build_grid_operations_status(region_df, fuel_df)
+
+    assert status_df.count() == 0
+    assert alerts_df.count() == 0
 
 
 def test_resource_planning_daily_aggregates_curated_gold_inputs(spark_session) -> None:

@@ -11,6 +11,7 @@ create table if not exists platinum.electric_power_operations_monthly (
     consumption_for_eg_thousand_units double precision,
     ash_content_pct double precision,
     heat_content_btu_per_unit double precision,
+    cost_usd double precision,
     fuel_heat_input_mmbtu double precision,
     heat_rate_btu_per_kwh double precision,
     loaded_at timestamptz not null,

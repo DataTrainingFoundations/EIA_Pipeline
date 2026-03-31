@@ -3,6 +3,7 @@ from __future__ import annotations
 import data_access
 import data_access_grid
 import data_access_planning
+import data_access_power
 import data_access_shared
 import data_access_summary
 import pandas as pd
@@ -150,6 +151,52 @@ def test_summary_queries_and_respondent_listing_use_safe_read_sql(
     assert any("ops.backfill_job_summary" in call["query"] for call in calls)
 
 
+def test_power_summary_queries_use_safe_read_sql(
+    monkeypatch,
+) -> None:  # noqa: ANN001
+    calls: list[dict[str, object]] = []
+    for func in (
+        data_access_power.get_power_operations_coverage,
+        data_access_power.list_power_locations,
+        data_access_power.list_power_sectors,
+    ):
+        func.clear()
+
+    def fake_read_sql(query, params=None):  # noqa: ANN001
+        calls.append({"query": query, "params": params})
+        if "select distinct location" in query:
+            return pd.DataFrame({"location": ["US", None, "TX"]})
+        if "select distinct sector_id" in query:
+            return pd.DataFrame(
+                [
+                    {"sector_id": 1, "sector_name": "Electric Utility"},
+                    {"sector_id": 2, "sector_name": "IPP"},
+                ]
+            )
+        return pd.DataFrame(
+            [
+                {
+                    "min_period": "2026-01-01T00:00:00+00:00",
+                    "max_period": "2026-03-01T00:00:00+00:00",
+                    "row_count": 15,
+                    "location_count": 2,
+                    "sector_count": 2,
+                }
+            ]
+        )
+
+    monkeypatch.setattr(data_access_power, "_safe_read_sql", fake_read_sql)
+
+    coverage = data_access_power.get_power_operations_coverage()
+    locations = data_access_power.list_power_locations()
+    sectors = data_access_power.list_power_sectors()
+
+    assert coverage["row_count"] == 15
+    assert locations == ["US", "TX"]
+    assert list(sectors["sector_id"]) == ["1", "2"]
+    assert any("electric_power_operations_monthly" in call["query"] for call in calls)
+
+
 def test_grid_and_planning_queries_apply_all_filters(
     monkeypatch,
 ) -> None:  # noqa: ANN001
@@ -210,6 +257,10 @@ def test_data_access_wrapper_reexports_split_modules() -> None:
     assert (
         data_access.load_latest_planning_snapshot
         is data_access_planning.load_latest_planning_snapshot
+    )
+    assert (
+        data_access.load_power_operations_monthly
+        is data_access_power.load_power_operations_monthly
     )
     assert data_access.get_connection is data_access_shared.get_connection
     assert data_access.get_summary_coverage is data_access_summary.get_summary_coverage

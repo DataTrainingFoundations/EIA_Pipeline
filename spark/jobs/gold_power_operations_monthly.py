@@ -83,6 +83,13 @@ def build_power_operations_monthly_fact(power_df: DataFrame) -> DataFrame:
                 F.greatest(F.col("heat_content_btu_per_unit"), F.lit(0.0)),
             ),
         )
+        .withColumn(
+            "cost_usd",
+            F.when(
+                F.col("cost_usd").isNotNull(),
+                F.greatest(F.col("cost_usd"), F.lit(0.0)),
+            ),
+        )
         .select(
             "period",
             "event_date",
@@ -96,6 +103,7 @@ def build_power_operations_monthly_fact(power_df: DataFrame) -> DataFrame:
             "consumption_for_eg_thousand_units",
             "generation_mwh",
             "heat_content_btu_per_unit",
+            "cost_usd",
             "loaded_at",
         )
         .orderBy("period", "sector_id", "fueltype_id")
@@ -127,6 +135,7 @@ def build_power_operations_monthly_fact(power_df: DataFrame) -> DataFrame:
             "consumption_for_eg_thousand_units",
             "generation_mwh",
             "heat_content_btu_per_unit",
+            "cost_usd",
         ],
         "gold.fact_electric_power_operations_monthly",
     )

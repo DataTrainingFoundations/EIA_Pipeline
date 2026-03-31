@@ -19,11 +19,12 @@ def test_clean_power_operational_data_parses_monthly_rows(spark_session) -> None
                     "sectorDescription": "Electric Utility",
                     "fueltypeid": "COL",
                     "fuelTypeDescription": "coal",
-                    "ash-content": "12.5",
-                    "ash-content-units": "percent",
-                    "consumption-for-eg": "10",
-                    "consumption-for-eg-units": "thousand physical units",
-                    "generation": "20",
+                "ash-content": "12.5",
+                "ash-content-units": "percent",
+                "cost": "42.5",
+                "consumption-for-eg": "10",
+                "consumption-for-eg-units": "thousand physical units",
+                "generation": "20",
                     "generation-units": "thousand megawatthours",
                     "heat-content": "20",
                     "heat-content-units": "Btu per physical units",
@@ -39,6 +40,7 @@ def test_clean_power_operational_data_parses_monthly_rows(spark_session) -> None
         "location",
         "sector_id",
         "fueltype_id",
+        "cost_usd",
         "generation_thousand_mwh",
     ).collect()[0]
 
@@ -46,6 +48,7 @@ def test_clean_power_operational_data_parses_monthly_rows(spark_session) -> None
     assert row["location"] == "US"
     assert row["sector_id"] == "1"
     assert row["fueltype_id"] == "COL"
+    assert row["cost_usd"] == 42.5
     assert row["generation_thousand_mwh"] == 20.0
 
 
@@ -65,6 +68,7 @@ def test_gold_power_operations_monthly_fact_keeps_latest_business_key(
                 "fueltype_id": "COL",
                 "fueltype_name": "coal",
                 "ash_content_pct": 10.0,
+                "cost_usd": 11.0,
                 "consumption_for_eg_thousand_units": 5.0,
                 "generation_thousand_mwh": 20.0,
                 "heat_content_btu_per_unit": 1000.0,
@@ -81,6 +85,7 @@ def test_gold_power_operations_monthly_fact_keeps_latest_business_key(
                 "fueltype_id": "COL",
                 "fueltype_name": "coal",
                 "ash_content_pct": 12.0,
+                "cost_usd": 13.0,
                 "consumption_for_eg_thousand_units": 6.0,
                 "generation_thousand_mwh": 30.0,
                 "heat_content_btu_per_unit": 1100.0,
@@ -95,6 +100,7 @@ def test_gold_power_operations_monthly_fact_keeps_latest_business_key(
     assert gold_df.count() == 1
     assert row["generation_mwh"] == 30000.0
     assert row["ash_content_pct"] == 12.0
+    assert row["cost_usd"] == 13.0
     assert row["consumption_for_eg_thousand_units"] == 6.0
 
 
@@ -116,6 +122,7 @@ def test_platinum_power_operations_monthly_derives_share_and_heat_rate(
                 "consumption_for_eg_thousand_units": 10.0,
                 "ash_content_pct": 12.0,
                 "heat_content_btu_per_unit": 20.0,
+                "cost_usd": 20.0,
                 "loaded_at": datetime(2026, 1, 2, 0, 0, tzinfo=timezone.utc),
             },
             {
@@ -131,6 +138,7 @@ def test_platinum_power_operations_monthly_derives_share_and_heat_rate(
                 "consumption_for_eg_thousand_units": 20.0,
                 "ash_content_pct": 0.0,
                 "heat_content_btu_per_unit": 1.0,
+                "cost_usd": 12.0,
                 "loaded_at": datetime(2026, 1, 2, 0, 0, tzinfo=timezone.utc),
             },
         ]
@@ -143,5 +151,6 @@ def test_platinum_power_operations_monthly_derives_share_and_heat_rate(
 
     assert rows["COL"]["generation_share_pct"] == 60.0
     assert rows["NG"]["generation_share_pct"] == 40.0
+    assert rows["COL"]["cost_usd"] == 20.0
     assert rows["COL"]["fuel_heat_input_mmbtu"] == 200000.0
     assert rows["COL"]["heat_rate_btu_per_kwh"] == 3333.3333333333335

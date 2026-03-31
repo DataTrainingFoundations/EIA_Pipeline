@@ -64,6 +64,11 @@ def build_grid_operations_status(
 ) -> tuple[DataFrame, DataFrame]:
     """Build the hourly status and alert stage tables for grid operations."""
 
+    # Region gold can contain forecast-only hours before actual demand arrives.
+    # Platinum grid operations is an actual-operations view, so those rows need
+    # to be excluded rather than failing the required-demand quality checks.
+    actual_region_df = region_df.filter(F.col("actual_demand_mwh").isNotNull())
+
     fuel_agg_df = fuel_df.groupBy("period", "respondent").agg(
         F.max("respondent_name").alias("fuel_respondent_name"),
         F.sum("generation_mwh").alias("total_generation_mwh"),
@@ -85,7 +90,7 @@ def build_grid_operations_status(
     )
 
     base_df = (
-        region_df.join(fuel_agg_df, ["period", "respondent"], "left")
+        actual_region_df.join(fuel_agg_df, ["period", "respondent"], "left")
         .withColumn(
             "respondent_name",
             F.coalesce(

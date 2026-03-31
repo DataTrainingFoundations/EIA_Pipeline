@@ -17,6 +17,7 @@ PLATINUM_TABLE = "platinum.region_demand_daily"
 GRID_OPERATIONS_TABLE = "platinum.grid_operations_hourly"
 GRID_OPERATIONS_ALERT_TABLE = "platinum.grid_operations_alert_hourly"
 RESOURCE_PLANNING_TABLE = "platinum.resource_planning_daily"
+POWER_OPERATIONS_MONTHLY_TABLE = "platinum.electric_power_operations_monthly"
 
 
 def _connection_kwargs() -> dict[str, object]:

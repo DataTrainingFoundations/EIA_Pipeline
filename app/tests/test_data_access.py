@@ -1,5 +1,6 @@
 import data_access_grid
 import data_access_planning
+import data_access_power
 import data_access_summary
 import pandas as pd
 import psycopg2
@@ -69,4 +70,48 @@ def test_get_backfill_status_returns_empty_frame_on_database_error(
         "min_chunk_start_utc",
         "max_chunk_end_utc",
         "last_updated_at",
+    ]
+
+
+def test_load_power_operations_queries_pass_filters(
+    monkeypatch,
+) -> None:  # noqa: ANN001
+    calls: list[dict] = []
+    data_access_power.load_power_operations_monthly.clear()
+    data_access_power.load_latest_power_operations_snapshot.clear()
+
+    def fake_read_sql(query, params=None):  # noqa: ANN001
+        calls.append({"query": query, "params": params})
+        return pd.DataFrame()
+
+    monkeypatch.setattr(data_access_power, "_safe_read_sql", fake_read_sql)
+
+    data_access_power.load_power_operations_monthly(
+        "2026-01-01T00:00:00+00:00",
+        "2026-03-01T00:00:00+00:00",
+        ["US", "TX"],
+        ["1"],
+    )
+    data_access_power.load_latest_power_operations_snapshot(
+        "2026-01-01T00:00:00+00:00",
+        "2026-03-01T00:00:00+00:00",
+        ["US"],
+        ["1", "2"],
+    )
+
+    assert "period >= %s" in calls[0]["query"]
+    assert "location = any(%s)" in calls[0]["query"]
+    assert "sector_id = any(%s)" in calls[0]["query"]
+    assert calls[0]["params"] == [
+        "2026-01-01T00:00:00+00:00",
+        "2026-03-01T00:00:00+00:00",
+        ["US", "TX"],
+        ["1"],
+    ]
+    assert "latest_period" in calls[1]["query"]
+    assert calls[1]["params"] == [
+        "2026-01-01T00:00:00+00:00",
+        "2026-03-01T00:00:00+00:00",
+        ["US"],
+        ["1", "2"],
     ]

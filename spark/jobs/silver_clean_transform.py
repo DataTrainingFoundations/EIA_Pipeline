@@ -285,6 +285,7 @@ def clean_power_operational_data(df: DataFrame) -> DataFrame:
         _normalized_unit(col("payload")["ash-content-units"]).alias(
             "ash_content_units"
         ),
+        col("payload")["cost"].cast("double").alias("cost_usd"),
         col("payload")["consumption-for-eg"]
         .cast("double")
         .alias("consumption_for_eg_thousand_units"),
@@ -313,6 +314,7 @@ def clean_power_operational_data(df: DataFrame) -> DataFrame:
             "fueltype_id",
             "fueltype_name",
             "ash_content_pct",
+            "cost_usd",
             "consumption_for_eg_thousand_units",
             "generation_thousand_mwh",
             "heat_content_btu_per_unit",

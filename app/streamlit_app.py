@@ -4,6 +4,7 @@ from data_access import (
     get_backfill_status,
     get_connection,
     get_grid_operations_coverage,
+    get_power_operations_coverage,
     get_planning_coverage,
     get_summary_coverage,
     table_has_rows,
@@ -165,11 +166,11 @@ with room2:
     st.markdown(
         _room_card(
             "Utility Strategy Director",
-            "Board-facing transition view for structural portfolio exposure and resilience.",
+            "Board-facing power portfolio strategy view for location-level fuel mix exposure and resilience.",
             [
-                "Spot utilities with the biggest transition gaps.",
-                "Compare carbon exposure, clean coverage, and gas reliance.",
-                "Use the board packet to explain one utility in detail.",
+                "Spot locations with the biggest transition gaps.",
+                "Compare renewable mix, coal and gas dependence, and heat-rate posture.",
+                "Use the board packet to explain one location in detail.",
             ],
             "landing-strategy",
         ),
@@ -198,7 +199,7 @@ with room3:
 st.divider()
 
 st.subheader("Coverage snapshot")
-coverage_col1, coverage_col2, coverage_col3 = st.columns(3)
+coverage_col1, coverage_col2, coverage_col3, coverage_col4 = st.columns(4)
 
 if table_has_rows():
     coverage = get_summary_coverage()
@@ -216,12 +217,21 @@ else:
 
 if table_has_rows("platinum.resource_planning_daily"):
     planning_coverage = get_planning_coverage()
-    coverage_col3.metric("Planning daily rows", f"{int(planning_coverage['row_count']):,}")
-    coverage_col3.caption(
+    coverage_col4.metric("Planning daily rows", f"{int(planning_coverage['row_count']):,}")
+    coverage_col4.caption(
         f"{planning_coverage['min_date']} to {planning_coverage['max_date']}"
     )
 else:
-    coverage_col3.info("Planning coverage is unavailable.")
+    coverage_col4.info("Planning coverage is unavailable.")
+
+if table_has_rows("platinum.electric_power_operations_monthly"):
+    power_coverage = get_power_operations_coverage()
+    coverage_col3.metric("Power monthly rows", f"{int(power_coverage['row_count']):,}")
+    coverage_col3.caption(
+        f"{power_coverage['min_period']} to {power_coverage['max_period']}"
+    )
+else:
+    coverage_col3.info("Power operations coverage is unavailable.")
 
 st.subheader("Operational Status")
 with st.expander("Backfill Status", expanded=False):

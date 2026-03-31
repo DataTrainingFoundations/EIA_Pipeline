@@ -1,362 +1,119 @@
-"""Utility Strategy Director dashboard.
-
-Roman Urdu:
-Ye page Utility Strategy Director ke liye design kiya gaya hai.
-Iska focus short-term operations nahin, balki long-term strategic position hai.
-
-Hum is page par ye dekhte hain:
-- kaun si utility carbon exposure mein high hai
-- kis ki renewable position weak hai
-- kis ki gas dependence zyada hai
-- kis ki clean coverage weak hai
-- kis ki fuel diversity weak hai
-- kis utility ko strategic attention sab se pehle chahiye
-
-Ye page Resource Planning Lead se alag hai kyun ke ye future positioning
-aur transition readiness par focus karta hai.
-"""
+"""Utility Strategy Director dashboard built from monthly power operations."""
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-from data_access import get_backfill_status, table_has_rows
-from data_access_shared import _safe_read_sql
-from ui_utils import build_default_date_range, coerce_numeric, safe_quantile
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
+from data_access import (
+    get_backfill_status,
+    get_power_operations_coverage,
+    list_power_locations,
+    list_power_sectors,
+    load_latest_power_operations_snapshot,
+    load_power_operations_monthly,
+    table_has_rows,
+)
+from ui_utils import build_default_date_range, coerce_numeric
+from utility_strategy_logic import (
+    FUEL_SCORE_COLUMNS,
+    aggregate_location_period,
+    build_priority_history,
+    build_strategy_thresholds,
+    derive_strategy_driver,
+    derive_strategy_priority,
+    is_rollup_fuel,
+    map_fuel_bucket,
+    normalize_direct,
+    normalize_inverse,
+    rank_priority_labels,
+    trend_label,
+)
 
 NUMERIC_COLUMNS = [
-    "daily_demand_mwh",
-    "renewable_share_pct",
-    "carbon_intensity_kg_per_mwh",
-    "fuel_diversity_index",
-    "peak_hour_gas_share_pct",
-    "clean_coverage_ratio",
+    "generation_mwh",
+    "generation_share_pct",
+    "consumption_for_eg_thousand_units",
+    "ash_content_pct",
+    "heat_content_btu_per_unit",
+    "cost_usd",
+    "fuel_heat_input_mmbtu",
+    "heat_rate_btu_per_kwh",
 ]
 
-PRIORITY_ORDER = ["Critical", "Elevated", "Stable"]
-
 PRIORITY_COLORS = {
-    "Critical": "#F59E0B",  # orange
-    "Elevated": "#2DD4BF",  # aqua
-    "Stable": "#F8FAFC",  # white
+    "Critical": "#E24B4A",
+    "Elevated": "#EF9F27",
+    "Stable": "#1D9E75",
 }
 
-COLOR_ORANGE = "#F59E0B"
-COLOR_WHITE = "#F8FAFC"
-COLOR_AQUA = "#2DD4BF"
-COLOR_RED = "#F97316"
-COLOR_BLUE = "#60A5FA"
-COLOR_GRID = "rgba(248,250,252,0.10)"
+SCORE_LABELS = {
+    "score_renewable": "Renewable",
+    "score_diversity": "Diversity",
+    "score_concentration": "Concentration",
+    "score_gas": "Gas dependence",
+    "score_coal": "Coal dependence",
+    "score_heat_rate": "Heat rate",
+}
+
+FUEL_BUCKET_ORDER = ["Renewable", "Gas", "Coal", "Nuclear", "Oil", "Other"]
+
 COLOR_BG = "#0B1220"
+COLOR_PANEL = "#0F172A"
+COLOR_TEXT = "#F8FAFC"
 COLOR_MUTED = "#CBD5E1"
-COLOR_GREEN = "#14B8A6"
-COLOR_AMBER = "#FBBF24"
+COLOR_GRID = "rgba(248,250,252,0.10)"
 
 
-# ---------------------------------------------------------------------------
-# Data loaders
-# ---------------------------------------------------------------------------
-
-
-@st.cache_data(ttl=300)
-def load_utility_strategy_daily(
-    start_date: str,
-    end_date: str,
-    respondents: list[str] | None,
-) -> pd.DataFrame:
-    """Load long-term strategy dataset."""
-
-    query = """
-        select
-            rp.date,
-            rp.respondent,
-            rp.respondent_name,
-            rp.daily_demand_mwh,
-            rp.renewable_share_pct,
-            rp.carbon_intensity_kg_per_mwh,
-            rp.fuel_diversity_index,
-            rp.peak_hour_gas_share_pct,
-            rp.clean_coverage_ratio,
-            rp.updated_at
-        from platinum.resource_planning_daily rp
-        where rp.date >= %s
-          and rp.date <= %s
-          and (%s is null or rp.respondent = any(%s))
-        order by rp.date, rp.respondent
-    """
-
-    params = [
-        start_date,
-        end_date,
-        respondents if respondents else None,
-        respondents if respondents else None,
-    ]
-
-    return _safe_read_sql(query, params=params)
-
-
-@st.cache_data(ttl=300)
-def load_latest_utility_snapshot(
-    start_date: str,
-    end_date: str,
-    respondents: list[str] | None,
-) -> pd.DataFrame:
-    """Load latest strategy snapshot only."""
-
-    query = """
-        with filtered as (
-            select
-                rp.date,
-                rp.respondent,
-                rp.respondent_name,
-                rp.daily_demand_mwh,
-                rp.renewable_share_pct,
-                rp.carbon_intensity_kg_per_mwh,
-                rp.fuel_diversity_index,
-                rp.peak_hour_gas_share_pct,
-                rp.clean_coverage_ratio,
-                rp.updated_at
-            from platinum.resource_planning_daily rp
-            where rp.date >= %s
-              and rp.date <= %s
-              and (%s is null or rp.respondent = any(%s))
-        ),
-        latest_date as (
-            select max(date) as date
-            from filtered
-        )
-        select f.*
-        from filtered f
-        join latest_date ld
-          on f.date = ld.date
-        order by f.respondent
-    """
-
-    params = [
-        start_date,
-        end_date,
-        respondents if respondents else None,
-        respondents if respondents else None,
-    ]
-
-    return _safe_read_sql(query, params=params)
-
-
-# ---------------------------------------------------------------------------
-# Helper functions
-# ---------------------------------------------------------------------------
-
-
-def style_figure(fig):
+def _style_figure(fig: go.Figure, *, height: int | None = None) -> go.Figure:
     fig.update_layout(
-        plot_bgcolor=COLOR_BG,
-        paper_bgcolor=COLOR_BG,
-        font_color=COLOR_WHITE,
+        plot_bgcolor=COLOR_PANEL,
+        paper_bgcolor=COLOR_PANEL,
+        font_color=COLOR_TEXT,
         margin=dict(l=10, r=10, t=55, b=10),
     )
-    fig.update_xaxes(showgrid=True, gridcolor=COLOR_GRID)
-    fig.update_yaxes(showgrid=True, gridcolor=COLOR_GRID)
+    fig.update_xaxes(showgrid=True, gridcolor=COLOR_GRID, zeroline=False)
+    fig.update_yaxes(showgrid=True, gridcolor=COLOR_GRID, zeroline=False)
+    if height is not None:
+        fig.update_layout(height=height)
     return fig
 
 
-def _color_strategy_priority(val: str) -> str:
-    color = PRIORITY_COLORS.get(val, "")
-    if val == "Stable":
-        return f"background-color: {color}; color: #0B1220; font-weight: 600;"
-    return f"background-color: {color}; color: white; font-weight: 600;"
+def _color_priority(value: str) -> str:
+    color = PRIORITY_COLORS.get(value, "")
+    if not color:
+        return ""
+    return f"background-color: {color}; color: #ffffff"
 
 
-def _derive_strategy_priority(
-    row: pd.Series, thresholds: dict[str, float | None]
-) -> str:
-    """Classify a respondent into strategy priority."""
-
-    carbon = pd.to_numeric(row.get("carbon_intensity_kg_per_mwh"), errors="coerce")
-    renewable = pd.to_numeric(row.get("renewable_share_pct"), errors="coerce")
-    gas = pd.to_numeric(row.get("peak_hour_gas_share_pct"), errors="coerce")
-    clean = pd.to_numeric(row.get("clean_coverage_ratio"), errors="coerce")
-    diversity = pd.to_numeric(row.get("fuel_diversity_index"), errors="coerce")
-
-    critical = (
-        (thresholds["carbon_p90"] is not None and carbon >= thresholds["carbon_p90"])
-        or (
-            thresholds["gas_p90"] is not None
-            and gas >= thresholds["gas_p90"]
-            and thresholds["renewable_p10"] is not None
-            and renewable <= thresholds["renewable_p10"]
-        )
-        or (
-            thresholds["clean_p10"] is not None
-            and clean <= thresholds["clean_p10"]
-            and thresholds["diversity_p10"] is not None
-            and diversity <= thresholds["diversity_p10"]
-        )
-    )
-
-    if critical:
-        return "Critical"
-
-    elevated = (
-        (thresholds["carbon_p75"] is not None and carbon >= thresholds["carbon_p75"])
-        or (
-            thresholds["renewable_p25"] is not None
-            and renewable <= thresholds["renewable_p25"]
-        )
-        or (thresholds["clean_p25"] is not None and clean <= thresholds["clean_p25"])
-        or (
-            thresholds["diversity_p25"] is not None
-            and diversity <= thresholds["diversity_p25"]
-        )
-    )
-
-    if elevated:
-        return "Elevated"
-
-    return "Stable"
+def _format_value(value: float | int | str | pd.Timestamp | None, suffix: str = "", decimals: int = 1) -> str:
+    if value is None or (not isinstance(value, str) and pd.isna(value)):
+        return "n/a"
+    if isinstance(value, pd.Timestamp):
+        return str(value.date())
+    if isinstance(value, str):
+        return value
+    return f"{value:.{decimals}f}{suffix}"
 
 
-def _priority_sort_rank(label: str) -> int:
-    mapping = {"Critical": 0, "Elevated": 1, "Stable": 2}
-    return mapping.get(label, 99)
-
-
-def _safe_min(series: pd.Series):
-    s = series.dropna()
-    return s.min() if not s.empty else None
-
-
-def _safe_max(series: pd.Series):
-    s = series.dropna()
-    return s.max() if not s.empty else None
-
-
-def _normalize_inverse(series: pd.Series) -> pd.Series:
-    """
-    Low is good, high is bad.
-    Example: carbon, gas dependence.
-    Final score: higher = better.
-    """
-    s = pd.to_numeric(series, errors="coerce")
-    min_val = s.min()
-    max_val = s.max()
-    if pd.isna(min_val) or pd.isna(max_val) or max_val == min_val:
-        return pd.Series([50] * len(s), index=s.index)
-    normalized = ((s - min_val) / (max_val - min_val) * 100).round(1)
-    return (100 - normalized).round(1)
-
-
-def _normalize_direct(series: pd.Series) -> pd.Series:
-    """
-    High is good, low is bad.
-    Example: renewable, clean coverage, diversity.
-    Final score: higher = better.
-    """
-    s = pd.to_numeric(series, errors="coerce")
-    min_val = s.min()
-    max_val = s.max()
-    if pd.isna(min_val) or pd.isna(max_val) or max_val == min_val:
-        return pd.Series([50] * len(s), index=s.index)
-    return ((s - min_val) / (max_val - min_val) * 100).round(1)
-
-
-def _trend_delta_label(
-    values: pd.Series,
-    higher_is_better: bool,
-) -> tuple[str, float]:
-
-    s = pd.to_numeric(values, errors="coerce").dropna()
-
-    if len(s) < 2:
-        return "Insufficient trend history", np.nan
-
-    delta = float(s.iloc[-1] - s.iloc[0])
-
-    tolerance = max(abs(s.mean()) * 0.01, 0.01)
-
-    if abs(delta) <= tolerance:
-        return "Stable", delta
-
-    if higher_is_better:
-        return ("Improving", delta) if delta > 0 else ("Worsening", delta)
-
-    return ("Improving", delta) if delta < 0 else ("Worsening", delta)
-
-
-def _trend_explanation(metric_name: str, label: str) -> str:
-    explanations = {
-        "carbon": {
-            "Improving": "Carbon intensity is moving down, which means the utility is becoming cleaner over time.",
-            "Worsening": "Carbon intensity is moving up, which means the utility is becoming more carbon intensive over time.",
-            "Stable": "Carbon intensity is relatively flat, which means there is no major change in carbon exposure.",
-            "Insufficient trend history": "There is not enough historical data to determine a clear carbon direction yet.",
-        },
-        "renewable": {
-            "Improving": "Renewable share is moving up, which means the utility is increasing clean energy usage.",
-            "Worsening": "Renewable share is moving down, which means the utility is losing renewable positioning.",
-            "Stable": "Renewable share is relatively flat, which means clean energy adoption is not materially changing.",
-            "Insufficient trend history": "There is not enough historical data to determine a clear renewable direction yet.",
-        },
-        "gas": {
-            "Improving": "Peak gas dependence is moving down, which means the utility is becoming less reliant on gas during stress periods.",
-            "Worsening": "Peak gas dependence is moving up, which means the utility is becoming more dependent on gas during stress periods.",
-            "Stable": "Peak gas dependence is relatively flat, which means there is no major change in gas reliance.",
-            "Insufficient trend history": "There is not enough historical data to determine a clear gas dependence direction yet.",
-        },
-        "clean": {
-            "Improving": "Clean coverage is moving up, which means cleaner energy is covering more of demand over time.",
-            "Worsening": "Clean coverage is moving down, which means cleaner energy is covering less of demand over time.",
-            "Stable": "Clean coverage is relatively flat, which means there is no major change in clean support.",
-            "Insufficient trend history": "There is not enough historical data to determine a clear clean coverage direction yet.",
-        },
-    }
-    return explanations.get(metric_name, {}).get(label, "")
-
-
-def _metric_delta_text(delta: float, suffix: str = "") -> str:
+def _metric_delta(delta: float, suffix: str = "") -> str:
     if pd.isna(delta):
         return "n/a"
     return f"{delta:+.2f}{suffix}"
 
 
-RISK_LABELS = {
-    "score_carbon": "Carbon exposure",
-    "score_renewable": "Renewable position",
-    "score_gas": "Peak gas reliance",
-    "score_clean": "Clean coverage",
-    "score_diversity": "Fuel diversity",
-}
-
-
-def _dominant_signal(row: pd.Series, mode: str) -> str:
-    score_columns = list(RISK_LABELS.keys())
-    numeric_scores = pd.to_numeric(row[score_columns], errors="coerce")
-    if numeric_scores.isna().all():
+def _best_position(row: pd.Series) -> str:
+    scores = pd.to_numeric(row[FUEL_SCORE_COLUMNS], errors="coerce")
+    if scores.isna().all():
         return "Insufficient data"
-    target_column = numeric_scores.idxmin() if mode == "risk" else numeric_scores.idxmax()
-    return RISK_LABELS[target_column]
+    return SCORE_LABELS[scores.idxmax()]
 
 
-def _brief_card(title: str, value: str, note: str) -> str:
-    return f"""
-    <div class="usd-brief-card">
-        <div class="usd-brief-title">{title}</div>
-        <div class="usd-brief-value">{value}</div>
-        <div class="usd-brief-note">{note}</div>
-    </div>
-    """
-
-
-def _build_radar_figure(focus_row: pd.Series, median_scores: dict[str, float]) -> go.Figure:
-    categories = list(RISK_LABELS.values())
-    focus_values = [float(focus_row[col]) for col in RISK_LABELS]
-    median_values = [float(median_scores[col]) for col in RISK_LABELS]
+def _radar_chart(focus_row: pd.Series, portfolio_medians: dict[str, float]) -> go.Figure:
+    categories = [SCORE_LABELS[column] for column in FUEL_SCORE_COLUMNS]
+    focus_values = [float(focus_row[column]) for column in FUEL_SCORE_COLUMNS]
+    median_values = [float(portfolio_medians[column]) for column in FUEL_SCORE_COLUMNS]
     categories = categories + [categories[0]]
     focus_values = focus_values + [focus_values[0]]
     median_values = median_values + [median_values[0]]
@@ -368,7 +125,7 @@ def _build_radar_figure(focus_row: pd.Series, median_scores: dict[str, float]) -
             theta=categories,
             fill="toself",
             name="Portfolio median",
-            line=dict(color=COLOR_BLUE, width=2),
+            line=dict(color="#60A5FA", width=2),
             fillcolor="rgba(96,165,250,0.18)",
         )
     )
@@ -377,35 +134,46 @@ def _build_radar_figure(focus_row: pd.Series, median_scores: dict[str, float]) -
             r=focus_values,
             theta=categories,
             fill="toself",
-            name=str(focus_row["respondent"]),
-            line=dict(color=COLOR_ORANGE, width=2),
-            fillcolor="rgba(245,158,11,0.26)",
+            name=str(focus_row["location"]),
+            line=dict(color="#F59E0B", width=2),
+            fillcolor="rgba(245,158,11,0.24)",
         )
     )
     fig.update_layout(
         polar=dict(
-            bgcolor=COLOR_BG,
+            bgcolor=COLOR_PANEL,
             radialaxis=dict(range=[0, 100], showgrid=True, gridcolor=COLOR_GRID),
             angularaxis=dict(gridcolor=COLOR_GRID),
         ),
-        plot_bgcolor=COLOR_BG,
-        paper_bgcolor=COLOR_BG,
-        font_color=COLOR_WHITE,
+        plot_bgcolor=COLOR_PANEL,
+        paper_bgcolor=COLOR_PANEL,
+        font_color=COLOR_TEXT,
         margin=dict(l=10, r=10, t=55, b=10),
-        title="Selected utility vs portfolio median",
-        legend=dict(orientation="h", y=1.1),
+        title="Selected location vs portfolio median",
+        legend=dict(orientation="h", y=1.08),
     )
     return fig
 
 
-# ---------------------------------------------------------------------------
-# Page config
-# ---------------------------------------------------------------------------
+def _score_breakdown_chart(focus_row: pd.Series) -> go.Figure:
+    labels = [SCORE_LABELS[column] for column in FUEL_SCORE_COLUMNS]
+    values = [float(focus_row[column]) for column in FUEL_SCORE_COLUMNS]
+    fig = px.bar(
+        x=labels,
+        y=values,
+        labels={"x": "", "y": "Score"},
+        title="Current strategic score breakdown",
+    )
+    fig.update_traces(marker_color="#F59E0B")
+    fig.update_yaxes(range=[0, 100])
+    return fig
+
 
 st.set_page_config(
     page_title="Utility Strategy Director",
     page_icon="⚡",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 st.markdown(
@@ -424,57 +192,11 @@ st.markdown(
         margin-bottom: 1rem;
         box-shadow: 0 16px 40px rgba(0,0,0,0.18);
     }
-    .usd-kicker {
-        color: #7dd3fc;
-        text-transform: uppercase;
-        letter-spacing: 0.12em;
-        font-size: 0.72rem;
-        margin-bottom: 0.45rem;
-    }
-    .usd-title {
-        font-size: 2rem;
-        font-weight: 700;
-        color: #f8fafc;
-        margin-bottom: 0.55rem;
-    }
-    .usd-copy {
-        color: #cbd5e1;
-        max-width: 58rem;
-        line-height: 1.5;
-    }
-    .usd-brief-card {
-        border: 1px solid rgba(148,163,184,0.20);
-        border-radius: 16px;
-        padding: 0.95rem 1rem;
-        background: rgba(15,23,42,0.72);
-        min-height: 132px;
-    }
-    .usd-brief-title {
-        color: #94a3b8;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        font-size: 0.72rem;
-        margin-bottom: 0.5rem;
-    }
-    .usd-brief-value {
-        color: #f8fafc;
-        font-size: 1.7rem;
-        font-weight: 700;
-        margin-bottom: 0.35rem;
-    }
-    .usd-brief-note {
-        color: #cbd5e1;
-        font-size: 0.9rem;
-        line-height: 1.4;
-    }
-    .usd-focus-note {
-        border: 1px solid rgba(148,163,184,0.18);
-        border-radius: 16px;
-        padding: 0.95rem 1rem;
-        background: rgba(15,23,42,0.72);
-        color: #e2e8f0;
-    }
-    [data-testid="stMetricValue"] { font-size: 1.35rem; font-weight: 650; }
+    .usd-kicker { color: #7dd3fc; text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.72rem; margin-bottom: 0.45rem; }
+    .usd-title { font-size: 2rem; font-weight: 700; color: #f8fafc; margin-bottom: 0.55rem; }
+    .usd-copy { color: #cbd5e1; max-width: 58rem; line-height: 1.5; }
+    .usd-note { border: 1px solid rgba(148,163,184,0.18); border-radius: 16px; padding: 0.95rem 1rem; background: rgba(15,23,42,0.72); color: #e2e8f0; }
+    [data-testid="stMetricValue"] { font-size: 1.3rem; font-weight: 650; }
     [data-testid="stMetricLabel"] { font-size: 0.84rem; color: #cbd5e1; }
     div[data-testid="stExpander"] summary { font-weight: 600; }
     </style>
@@ -482,773 +204,612 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ---------------------------------------------------------------------------
-# Header
-# ---------------------------------------------------------------------------
-
 st.markdown(
     """
     <div class="usd-hero">
-        <div class="usd-kicker">Transition readiness brief</div>
+        <div class="usd-kicker">Power portfolio strategy</div>
         <div class="usd-title">Utility Strategy Director</div>
         <div class="usd-copy">
-            This page is intentionally different from the operational and planning views. It is a
-            board-facing read on long-term transition posture: who is structurally exposed, who is
-            improving, and where portfolio resilience is still thin.
+            This page is a long-horizon strategy view built from monthly electric power operations data.
+            The ranked entities are <strong>locations</strong>, not utility respondents. Use it to identify
+            structurally exposed power portfolios by fuel mix, concentration, coal and gas dependence,
+            and generation efficiency.
         </div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-with st.expander("What this page tells you", expanded=True):
-    st.markdown("""
-- **Which utilities need strategic attention first**
-- **Which utilities are more exposed to future transition risk**
-- **Which utilities are weaker on renewable position or clean coverage**
-- **Which utilities rely more heavily on gas at peak demand**
-- **Whether a selected utility is improving or worsening over time**
-""")
-
-# ---------------------------------------------------------------------------
-# Guard checks
-# ---------------------------------------------------------------------------
-
-if not table_has_rows("platinum.resource_planning_daily"):
+if not table_has_rows("platinum.electric_power_operations_monthly"):
     st.warning(
-        "No rows found in platinum.resource_planning_daily. "
-        "Please allow the planning pipeline to complete at least one run."
+        "No rows found in `platinum.electric_power_operations_monthly`. Let the power monthly "
+        "pipeline complete at least one run first."
     )
     st.stop()
 
-coverage_query = """
-    select
-        min(date) as min_date,
-        max(date) as max_date,
-        count(*) as row_count,
-        count(distinct respondent) as respondent_count
-    from platinum.resource_planning_daily
+coverage = get_power_operations_coverage()
+min_period = pd.to_datetime(coverage["min_period"], utc=True)
+max_period = pd.to_datetime(coverage["max_period"], utc=True)
+default_start_date, default_end_date = build_default_date_range(min_period, max_period, lookback_days=365)
+all_locations = list_power_locations()
+sector_df = list_power_sectors()
+sector_df["sector_id"] = sector_df["sector_id"].astype(str)
+sector_df["sector_name"] = sector_df["sector_name"].astype(str)
+sector_df["option_label"] = sector_df["sector_name"] + " (" + sector_df["sector_id"] + ")"
+default_sector_labels = (
+    sector_df[sector_df["sector_name"].str.lower() == "electric utility"]["option_label"].tolist()
+    or sector_df["option_label"].tolist()
+)
+
+with st.sidebar:
+    st.title("Utility Strategy Director")
+    st.caption("Filter the board-facing power portfolio strategy view below.")
+    st.divider()
+    selected_range = st.date_input(
+        "Date range",
+        value=(default_start_date, default_end_date),
+        min_value=min_period.date(),
+        max_value=max_period.date(),
+    )
+    selected_sector_labels = st.multiselect(
+        "Sectors",
+        sector_df["option_label"].tolist(),
+        default=default_sector_labels,
+        help="Leave blank to include all sectors.",
+    )
+    show_us_total = st.checkbox("Show U.S. total", value=True)
+    selected_locations = st.multiselect(
+        "Locations",
+        all_locations,
+        default=[],
+        help="Leave blank to include all locations.",
+    )
+    st.divider()
+    with st.expander("How to read this page"):
+        st.markdown(
+            """
+- KPI strip: current location-level portfolio pressure at a glance.
+- Watchlist: where structural strategy attention is needed first.
+- Exposure: where transition gaps and gas dependence are concentrated.
+- Composition: how the latest location portfolios are built by fuel bucket.
+- Focus: one location against the portfolio median plus trend direction.
+- Supporting evidence: detailed tables, heatmap, cost coverage, export, and backfill status.
 """
+        )
 
-coverage_df = _safe_read_sql(coverage_query)
-
-if coverage_df.empty:
-    st.warning("Planning coverage query returned no rows.")
+if len(selected_range) != 2:
+    st.info("Select a start and end date to load data.")
     st.stop()
 
-coverage = coverage_df.iloc[0]
-min_date = pd.to_datetime(coverage["min_date"], errors="coerce")
-max_date = pd.to_datetime(coverage["max_date"], errors="coerce")
-
-if pd.isna(min_date) or pd.isna(max_date):
-    st.warning("Valid planning coverage dates are not available.")
-    st.stop()
-
-default_start_date, default_end_date = build_default_date_range(
-    min_date,
-    max_date,
-    lookback_days=30,
+selected_sector_ids = sector_df.loc[
+    sector_df["option_label"].isin(selected_sector_labels or sector_df["option_label"].tolist()),
+    "sector_id",
+].tolist()
+selected_locations_filter = (
+    None if not selected_locations or set(selected_locations) == set(all_locations) else selected_locations
 )
-
-respondent_query = """
-    select distinct respondent
-    from platinum.resource_planning_daily
-    where respondent is not null
-    order by respondent
-"""
-respondent_df = _safe_read_sql(respondent_query)
-respondents = respondent_df["respondent"].dropna().tolist()
-
-# ---------------------------------------------------------------------------
-# Filters
-# ---------------------------------------------------------------------------
-
-filter_col1, filter_col2 = st.columns([1, 1])
-
-selected_range = filter_col1.date_input(
-    "Date range",
-    value=(default_start_date, default_end_date),
-    min_value=min_date.date(),
-    max_value=max_date.date(),
-)
-
-selected_respondents = filter_col2.multiselect(
-    "Respondents",
-    respondents,
-    default=respondents,
-)
-
-if not isinstance(selected_range, tuple) or len(selected_range) != 2:
-    st.info("Please select a valid start and end date.")
-    st.stop()
-
 start_date, end_date = selected_range
-filtered_respondents = selected_respondents or None
+start_ts = f"{start_date}T00:00:00+00:00"
+end_ts = f"{end_date}T23:59:59+00:00"
 
-# ---------------------------------------------------------------------------
-# Load data
-# ---------------------------------------------------------------------------
+with st.spinner("Loading monthly power portfolio data..."):
+    power_df = load_power_operations_monthly(
+        start_ts,
+        end_ts,
+        selected_locations_filter,
+        selected_sector_ids,
+    )
+    latest_power_df = load_latest_power_operations_snapshot(
+        start_ts,
+        end_ts,
+        selected_locations_filter,
+        selected_sector_ids,
+    )
 
-strategy_df = load_utility_strategy_daily(
-    str(start_date),
-    str(end_date),
-    filtered_respondents,
-)
+if power_df.empty or latest_power_df.empty:
+    fallback_sector_ids = sector_df["sector_id"].tolist()
+    if selected_sector_ids != fallback_sector_ids:
+        st.info("No rows matched the selected sectors. Showing all sectors for the available month instead.")
+        with st.spinner("Reloading across all sectors..."):
+            power_df = load_power_operations_monthly(
+                start_ts,
+                end_ts,
+                selected_locations_filter,
+                fallback_sector_ids,
+            )
+            latest_power_df = load_latest_power_operations_snapshot(
+                start_ts,
+                end_ts,
+                selected_locations_filter,
+                fallback_sector_ids,
+            )
 
-latest_snapshot_df = load_latest_utility_snapshot(
-    str(start_date),
-    str(end_date),
-    filtered_respondents,
-)
-
-if strategy_df.empty:
-    st.warning("No strategy data was found for the selected filters.")
+if power_df.empty or latest_power_df.empty:
+    st.warning("No power operations rows were found for the selected filters.")
     st.stop()
 
-if latest_snapshot_df.empty:
-    st.warning("The latest strategy snapshot is empty for the selected filters.")
-    st.stop()
+power_df["period"] = pd.to_datetime(power_df["period"], utc=True)
+latest_power_df["period"] = pd.to_datetime(latest_power_df["period"], utc=True)
+power_df = coerce_numeric(power_df, NUMERIC_COLUMNS)
+latest_power_df = coerce_numeric(latest_power_df, NUMERIC_COLUMNS)
 
-# ---------------------------------------------------------------------------
-# Clean data
-# ---------------------------------------------------------------------------
+location_period_df = aggregate_location_period(power_df)
+latest_location_df = aggregate_location_period(latest_power_df)
 
-strategy_df["date"] = pd.to_datetime(strategy_df["date"], errors="coerce")
-latest_snapshot_df["date"] = pd.to_datetime(latest_snapshot_df["date"], errors="coerce")
+if not show_us_total:
+    location_period_df = location_period_df[location_period_df["location"] != "US"]
+    latest_location_df = latest_location_df[latest_location_df["location"] != "US"]
 
-strategy_df = coerce_numeric(strategy_df, NUMERIC_COLUMNS)
-latest_snapshot_df = coerce_numeric(latest_snapshot_df, NUMERIC_COLUMNS)
+if location_period_df.empty or latest_location_df.empty:
+    if all_locations == ["US"]:
+        st.info("Only the U.S. total is currently available in the platinum power table, so the page is showing that portfolio view.")
+        location_period_df = aggregate_location_period(power_df)
+        latest_location_df = aggregate_location_period(latest_power_df)
+    else:
+        st.warning("The selected filters left no location-level rows to analyze.")
+        st.stop()
 
-thresholds = {
-    "carbon_p90": safe_quantile(
-        latest_snapshot_df["carbon_intensity_kg_per_mwh"], 0.90
-    ),
-    "gas_p90": safe_quantile(latest_snapshot_df["peak_hour_gas_share_pct"], 0.90),
-    "renewable_p10": safe_quantile(latest_snapshot_df["renewable_share_pct"], 0.10),
-    "carbon_p75": safe_quantile(
-        latest_snapshot_df["carbon_intensity_kg_per_mwh"], 0.75
-    ),
-    "renewable_p25": safe_quantile(latest_snapshot_df["renewable_share_pct"], 0.25),
-    "clean_p25": safe_quantile(latest_snapshot_df["clean_coverage_ratio"], 0.25),
-    "clean_p10": safe_quantile(latest_snapshot_df["clean_coverage_ratio"], 0.10),
-    "diversity_p10": safe_quantile(latest_snapshot_df["fuel_diversity_index"], 0.10),
-    "diversity_p25": safe_quantile(latest_snapshot_df["fuel_diversity_index"], 0.25),
-}
+if latest_location_df["location"].nunique() == 1:
+    st.info("Current power platinum coverage contains a single location snapshot. The page stays live, but cross-location benchmarking is limited until more locations are loaded.")
+single_location_mode = latest_location_df["location"].nunique() == 1
 
-latest_snapshot_df["strategy_priority"] = latest_snapshot_df.apply(
-    _derive_strategy_priority,
-    axis=1,
-    thresholds=thresholds,
-)
+thresholds = build_strategy_thresholds(latest_location_df)
+for frame in (location_period_df, latest_location_df):
+    frame["strategy_priority"] = frame.apply(
+        derive_strategy_priority,
+        axis=1,
+        thresholds=thresholds,
+    )
+    frame["primary_driver"] = frame.apply(derive_strategy_driver, axis=1)
 
-latest_snapshot_df["priority_rank"] = latest_snapshot_df["strategy_priority"].map(
-    _priority_sort_rank
-)
-
-latest_snapshot_df["score_carbon"] = _normalize_inverse(
-    latest_snapshot_df["carbon_intensity_kg_per_mwh"]
-)
-latest_snapshot_df["score_renewable"] = _normalize_direct(
-    latest_snapshot_df["renewable_share_pct"]
-)
-latest_snapshot_df["score_gas"] = _normalize_inverse(
-    latest_snapshot_df["peak_hour_gas_share_pct"]
-)
-latest_snapshot_df["score_clean"] = _normalize_direct(
-    latest_snapshot_df["clean_coverage_ratio"]
-)
-latest_snapshot_df["score_diversity"] = _normalize_direct(
-    latest_snapshot_df["fuel_diversity_index"]
-)
-
-latest_snapshot_df["strategic_health_score"] = (
-    latest_snapshot_df["score_carbon"] * 0.25
-    + latest_snapshot_df["score_renewable"] * 0.25
-    + latest_snapshot_df["score_gas"] * 0.20
-    + latest_snapshot_df["score_clean"] * 0.20
-    + latest_snapshot_df["score_diversity"] * 0.10
+latest_location_df["score_renewable"] = normalize_direct(latest_location_df["renewable_share_pct"])
+latest_location_df["score_diversity"] = normalize_direct(latest_location_df["fuel_diversity_index"])
+latest_location_df["score_concentration"] = normalize_inverse(latest_location_df["largest_fuel_share_pct"])
+latest_location_df["score_gas"] = normalize_inverse(latest_location_df["gas_share_pct"])
+latest_location_df["score_coal"] = normalize_inverse(latest_location_df["coal_share_pct"])
+latest_location_df["score_heat_rate"] = normalize_inverse(latest_location_df["weighted_heat_rate_btu_per_kwh"])
+latest_location_df["strategic_health_score"] = (
+    latest_location_df["score_renewable"] * 0.25
+    + latest_location_df["score_diversity"] * 0.20
+    + latest_location_df["score_concentration"] * 0.20
+    + latest_location_df["score_gas"] * 0.15
+    + latest_location_df["score_coal"] * 0.10
+    + latest_location_df["score_heat_rate"] * 0.10
 ).round(1)
-latest_snapshot_df["transition_gap"] = (
-    100 - latest_snapshot_df["strategic_health_score"]
-).round(1)
-latest_snapshot_df["dominant_risk"] = latest_snapshot_df.apply(
-    _dominant_signal,
-    axis=1,
-    mode="risk",
-)
-latest_snapshot_df["best_position"] = latest_snapshot_df.apply(
-    _dominant_signal,
-    axis=1,
-    mode="strength",
-)
-
-latest_snapshot_df = latest_snapshot_df.sort_values(
-    ["priority_rank", "transition_gap", "carbon_intensity_kg_per_mwh"],
-    ascending=[True, False, False],
+latest_location_df["transition_gap"] = (100.0 - latest_location_df["strategic_health_score"]).round(1)
+latest_location_df["best_position"] = latest_location_df.apply(_best_position, axis=1)
+latest_location_df = rank_priority_labels(latest_location_df, "strategy_priority")
+latest_location_df = latest_location_df.sort_values(
+    ["strategy_priority", "transition_gap", "coal_share_pct", "location"],
+    ascending=[True, False, False, True],
     kind="stable",
-)
+).reset_index(drop=True)
 
-latest_date = latest_snapshot_df["date"].max()
+location_score_map = latest_location_df[
+    ["location", "strategic_health_score", "transition_gap"]
+].set_index("location")
+for column in ["strategic_health_score", "transition_gap"]:
+    location_period_df[column] = location_period_df["location"].map(location_score_map[column])
 
-focus_options = latest_snapshot_df["respondent"].dropna().tolist()
-
-if not focus_options:
-    st.warning("No respondents are available for focus analysis.")
-    st.stop()
-
-focus_respondent = st.selectbox("Focus utility", focus_options, index=0)
-
-focus_df = (
-    strategy_df[strategy_df["respondent"] == focus_respondent]
-    .copy()
-    .sort_values("date")
-)
-
-# ---------------------------------------------------------------------------
-# KPI row
-# ---------------------------------------------------------------------------
-
-kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
-
-kpi1.metric(
-    "Latest strategic snapshot",
-    str(latest_date.date()) if pd.notna(latest_date) else "n/a",
-)
-kpi2.metric("Utilities in scope", f"{latest_snapshot_df['respondent'].nunique():,}")
-
-max_carbon = _safe_max(latest_snapshot_df["carbon_intensity_kg_per_mwh"])
-min_renewable = _safe_min(latest_snapshot_df["renewable_share_pct"])
-avg_score = latest_snapshot_df["strategic_health_score"].dropna().mean()
-
-kpi3.metric(
-    "Highest carbon intensity", f"{max_carbon:.1f}" if max_carbon is not None else "n/a"
-)
-kpi4.metric(
-    "Lowest renewable share",
-    f"{min_renewable:.1f}%" if min_renewable is not None else "n/a",
-)
-kpi5.metric(
-    "Average strategic health", f"{avg_score:.1f}" if pd.notna(avg_score) else "n/a"
-)
+priority_history_df = build_priority_history(location_period_df)
+latest_period = pd.to_datetime(latest_location_df["period"].max(), utc=True)
+focus_location = st.selectbox("Focus location", latest_location_df["location"].tolist(), index=0)
+focus_df = location_period_df[location_period_df["location"] == focus_location].copy().sort_values("period")
+focus_row = latest_location_df[latest_location_df["location"] == focus_location].iloc[0]
 
 st.caption(
-    "This page focuses on long-term positioning rather than short-term operations. "
-    "It helps identify which utilities are strategically stronger and which need attention."
+    f"Showing **{start_date}** -> **{end_date}** | **{latest_location_df['location'].nunique()}** locations | "
+    f"Latest loaded month: **{latest_period.date()}**"
 )
+
+k1, k2, k3, k4, k5, k6 = st.columns(6)
+k1.metric("Locations in scope", f"{latest_location_df['location'].nunique():,}")
+k2.metric("Critical locations", f"{int((latest_location_df['strategy_priority'] == 'Critical').sum()):,}")
+k3.metric("Avg renewable share", _format_value(latest_location_df["renewable_share_pct"].mean(), suffix="%"))
+k4.metric("Highest coal share", _format_value(latest_location_df["coal_share_pct"].max(), suffix="%"))
+k5.metric("Worst heat rate", _format_value(latest_location_df["weighted_heat_rate_btu_per_kwh"].max(), decimals=0))
+k6.metric("Latest loaded month", _format_value(latest_period))
 
 st.divider()
 
-# ---------------------------------------------------------------------------
-# Strategic Watchlist
-# ---------------------------------------------------------------------------
+st.subheader("Watchlist")
+st.caption("Ranked locations that need structural strategy attention first.")
 
-st.subheader("Strategic Risk Watchlist")
-
-st.caption(
-    "This watchlist highlights utilities that may need the most long-term attention, "
-    "based on carbon exposure, renewable position, gas dependence, clean coverage, and fuel diversity."
-)
-
-watchlist_display = latest_snapshot_df[
+watchlist_display = latest_location_df[
     [
-        "respondent",
-        "respondent_name",
+        "location",
+        "location_name",
         "strategy_priority",
-        "dominant_risk",
-        "transition_gap",
+        "primary_driver",
         "strategic_health_score",
+        "transition_gap",
         "renewable_share_pct",
-        "carbon_intensity_kg_per_mwh",
-        "peak_hour_gas_share_pct",
-        "clean_coverage_ratio",
+        "gas_share_pct",
+        "coal_share_pct",
         "fuel_diversity_index",
+        "weighted_heat_rate_btu_per_kwh",
     ]
 ].rename(
     columns={
-        "respondent": "Utility",
-        "respondent_name": "Name",
+        "location": "Location",
+        "location_name": "Name",
         "strategy_priority": "Priority",
-        "dominant_risk": "Largest drag",
-        "transition_gap": "Transition gap",
+        "primary_driver": "Primary driver",
         "strategic_health_score": "Strategic health score",
+        "transition_gap": "Transition gap",
         "renewable_share_pct": "Renewable share (%)",
-        "carbon_intensity_kg_per_mwh": "Carbon intensity (kg/MWh)",
-        "peak_hour_gas_share_pct": "Peak gas dependence (%)",
-        "clean_coverage_ratio": "Clean coverage ratio",
+        "gas_share_pct": "Gas share (%)",
+        "coal_share_pct": "Coal share (%)",
         "fuel_diversity_index": "Fuel diversity",
+        "weighted_heat_rate_btu_per_kwh": "Heat rate",
     }
 )
-
 st.dataframe(
-    watchlist_display.style.map(_color_strategy_priority, subset=["Priority"]),
+    watchlist_display.style.map(_color_priority, subset=["Priority"]),
     use_container_width=True,
     hide_index=True,
-)
-
-brief_col1, brief_col2, brief_col3, brief_col4 = st.columns(4)
-brief_col1.markdown(
-    _brief_card(
-        "Critical utilities",
-        f"{int((latest_snapshot_df['strategy_priority'] == 'Critical').sum()):,}",
-        "Utilities already carrying multiple structural weaknesses.",
-    ),
-    unsafe_allow_html=True,
-)
-brief_col2.markdown(
-    _brief_card(
-        "Elevated utilities",
-        f"{int((latest_snapshot_df['strategy_priority'] == 'Elevated').sum()):,}",
-        "Utilities that need active transition management before they worsen.",
-    ),
-    unsafe_allow_html=True,
-)
-brief_col3.markdown(
-    _brief_card(
-        "Largest transition gap",
-        f"{latest_snapshot_df['transition_gap'].dropna().max():.1f}"
-        if latest_snapshot_df["transition_gap"].notna().any()
-        else "n/a",
-        "Higher means the utility is farther from a strong portfolio position.",
-    ),
-    unsafe_allow_html=True,
-)
-brief_col4.markdown(
-    _brief_card(
-        "Average health score",
-        f"{latest_snapshot_df['strategic_health_score'].dropna().mean():.1f}"
-        if latest_snapshot_df["strategic_health_score"].notna().any()
-        else "n/a",
-        "Higher means stronger long-term transition posture.",
-    ),
-    unsafe_allow_html=True,
+    height=min(40 + 35 * len(watchlist_display), 430),
 )
 
 st.divider()
 
-# ---------------------------------------------------------------------------
-# Strategic visuals
-# ---------------------------------------------------------------------------
+st.subheader("Where is exposure concentrated?")
+exposure_left, exposure_right = st.columns(2)
 
-st.subheader("Strategic Positioning Overview")
-
-viz_col1, viz_col2 = st.columns([1.45, 1])
-
-scatter_df = latest_snapshot_df.dropna(
-    subset=["renewable_share_pct", "carbon_intensity_kg_per_mwh", "daily_demand_mwh"]
-).copy()
-
-if scatter_df.empty:
-    viz_col1.info("No positioning data is available.")
-else:
-    fig_scatter = px.scatter(
-        scatter_df,
-        x="renewable_share_pct",
-        y="carbon_intensity_kg_per_mwh",
-        size="daily_demand_mwh",
-        color="strategy_priority",
-        color_discrete_map=PRIORITY_COLORS,
-        hover_name="respondent",
-        hover_data={
-            "respondent_name": True,
-            "renewable_share_pct": ":.1f",
-            "carbon_intensity_kg_per_mwh": ":.1f",
-            "peak_hour_gas_share_pct": ":.1f",
-            "clean_coverage_ratio": ":.2f",
-            "daily_demand_mwh": ":,.0f",
-        },
-        labels={
-            "renewable_share_pct": "Renewable share (%)",
-            "carbon_intensity_kg_per_mwh": "Carbon intensity (kg/MWh)",
-            "strategy_priority": "Priority",
-        },
-        title="Risk Positioning: Renewable Share vs Carbon Intensity",
+if single_location_mode:
+    sector_snapshot_df = latest_power_df.copy()
+    sector_snapshot_df = (
+        sector_snapshot_df.groupby(["sector_name"], as_index=False)["generation_mwh"].sum()
+        .sort_values("generation_mwh", ascending=False)
     )
+    sector_total = sector_snapshot_df["generation_mwh"].sum()
+    sector_snapshot_df["generation_share_pct"] = (
+        sector_snapshot_df["generation_mwh"] / sector_total * 100.0
+    )
+    fig_sector = px.bar(
+        sector_snapshot_df.head(8).sort_values("generation_share_pct", ascending=True),
+        x="generation_share_pct",
+        y="sector_name",
+        orientation="h",
+        labels={"generation_share_pct": "Generation share (%)", "sector_name": ""},
+        title="Latest generation mix by sector",
+    )
+    fig_sector.update_traces(marker_color="#60A5FA")
+    exposure_left.plotly_chart(_style_figure(fig_sector, height=430), use_container_width=True)
 
-    renewable_ref = latest_snapshot_df["renewable_share_pct"].median()
-    carbon_ref = latest_snapshot_df["carbon_intensity_kg_per_mwh"].median()
-
-    if pd.notna(renewable_ref):
-        fig_scatter.add_vline(
-            x=renewable_ref,
-            line_dash="dash",
-            line_color=COLOR_MUTED,
-            opacity=0.6,
-        )
-    if pd.notna(carbon_ref):
-        fig_scatter.add_hline(
-            y=carbon_ref,
-            line_dash="dash",
-            line_color=COLOR_MUTED,
-            opacity=0.6,
-        )
-
-    fig_scatter = style_figure(fig_scatter)
-    viz_col1.plotly_chart(fig_scatter, use_container_width=True)
-
-gap_rank_df = (
-    latest_snapshot_df.dropna(subset=["transition_gap"])
-    .head(8)
-    .sort_values("transition_gap", ascending=True)
-)
-
-if gap_rank_df.empty:
-    viz_col2.info("No transition-gap ranking data is available.")
+    sector_fuel_df = latest_power_df.copy()
+    sector_fuel_df["fuel_bucket"] = sector_fuel_df.apply(
+        lambda row: map_fuel_bucket(row.get("fueltype_id"), row.get("fueltype_name")),
+        axis=1,
+    )
+    sector_fuel_df["is_rollup_fuel"] = sector_fuel_df.apply(
+        lambda row: is_rollup_fuel(row.get("fueltype_id"), row.get("fueltype_name")),
+        axis=1,
+    )
+    if (~sector_fuel_df["is_rollup_fuel"]).any():
+        sector_fuel_df = sector_fuel_df[~sector_fuel_df["is_rollup_fuel"]]
+    sector_fuel_df = (
+        sector_fuel_df.groupby(["sector_name", "fuel_bucket"], as_index=False)["generation_mwh"].sum()
+    )
+    fig_sector_fuel = px.bar(
+        sector_fuel_df,
+        x="sector_name",
+        y="generation_mwh",
+        color="fuel_bucket",
+        category_orders={"fuel_bucket": FUEL_BUCKET_ORDER},
+        labels={
+            "sector_name": "Sector",
+            "generation_mwh": "Generation (MWh)",
+            "fuel_bucket": "Fuel bucket",
+        },
+        title="Latest sector fuel posture",
+    )
+    exposure_right.plotly_chart(_style_figure(fig_sector_fuel, height=430), use_container_width=True)
 else:
+    gap_rank_df = latest_location_df.head(10).sort_values("transition_gap", ascending=True)
     fig_gap = px.bar(
         gap_rank_df,
         x="transition_gap",
-        y="respondent",
+        y="location",
         orientation="h",
         color="strategy_priority",
         color_discrete_map=PRIORITY_COLORS,
-        labels={"transition_gap": "Transition gap", "respondent": ""},
-        title="Largest current transition gaps",
-        hover_data={"dominant_risk": True, "best_position": True},
+        labels={"transition_gap": "Transition gap", "location": ""},
+        title="Top transition gaps by location",
+        hover_data={"primary_driver": True, "coal_share_pct": ":.1f", "gas_share_pct": ":.1f"},
     )
     fig_gap.update_layout(showlegend=False)
-    fig_gap = style_figure(fig_gap)
-    viz_col2.plotly_chart(fig_gap, use_container_width=True)
+    exposure_left.plotly_chart(_style_figure(fig_gap, height=430), use_container_width=True)
+
+    scatter_df = latest_location_df.dropna(
+        subset=["renewable_share_pct", "gas_share_pct", "total_generation_mwh"]
+    ).copy()
+    fig_scatter = px.scatter(
+        scatter_df,
+        x="renewable_share_pct",
+        y="gas_share_pct",
+        size="total_generation_mwh",
+        color="strategy_priority",
+        color_discrete_map=PRIORITY_COLORS,
+        hover_name="location",
+        hover_data={
+            "location_name": True,
+            "coal_share_pct": ":.1f",
+            "fuel_diversity_index": ":.2f",
+            "weighted_heat_rate_btu_per_kwh": ":.0f",
+            "transition_gap": ":.1f",
+        },
+        labels={
+            "renewable_share_pct": "Renewable share (%)",
+            "gas_share_pct": "Gas share (%)",
+            "strategy_priority": "Priority",
+        },
+        title="Renewable share vs gas dependence",
+    )
+    exposure_right.plotly_chart(_style_figure(fig_scatter, height=430), use_container_width=True)
 
 st.divider()
 
-# ---------------------------------------------------------------------------
-# Dynamic Heatmap
-# ---------------------------------------------------------------------------
+st.subheader("Portfolio composition snapshot")
+composition_locations = latest_location_df.head(6)["location"].tolist()
+composition_df = latest_power_df[latest_power_df["location"].isin(composition_locations)].copy()
+composition_df["fuel_bucket"] = composition_df.apply(
+    lambda row: map_fuel_bucket(row.get("fueltype_id"), row.get("fueltype_name")),
+    axis=1,
+)
+composition_df["is_rollup_fuel"] = composition_df.apply(
+    lambda row: is_rollup_fuel(row.get("fueltype_id"), row.get("fueltype_name")),
+    axis=1,
+)
+if (~composition_df["is_rollup_fuel"]).any():
+    composition_df = composition_df[~composition_df["is_rollup_fuel"]]
+composition_df = (
+    composition_df.groupby(["location", "fuel_bucket"], as_index=False)["generation_mwh"].sum()
+)
+composition_totals = composition_df.groupby("location")["generation_mwh"].transform("sum")
+composition_df["share_pct"] = composition_df["generation_mwh"] / composition_totals * 100.0
+fig_mix = px.bar(
+    composition_df,
+    x="location",
+    y="share_pct",
+    color="fuel_bucket",
+    category_orders={"fuel_bucket": FUEL_BUCKET_ORDER},
+    barmode="stack",
+    labels={"location": "Location", "share_pct": "Generation share (%)", "fuel_bucket": "Fuel bucket"},
+    title="Latest portfolio mix by fuel bucket",
+)
+st.plotly_chart(_style_figure(fig_mix, height=420), use_container_width=True)
 
-st.subheader("Strategic Strength and Risk Heatmap")
+st.divider()
 
+st.subheader(f"Focus location: {focus_location}")
 st.caption(
-    "Green indicates strong positioning, red indicates weaker positioning. "
-    "The color scale is dynamically adjusted for clarity."
+    "Selected location against the latest portfolio median."
+    if not single_location_mode
+    else "Current location strategy posture for the available platinum snapshot."
 )
 
-heatmap_source = latest_snapshot_df[
-    [
-        "respondent",
-        "strategy_priority",
-        "strategic_health_score",
-        "score_carbon",
-        "score_renewable",
-        "score_gas",
-        "score_clean",
-        "score_diversity",
-    ]
-].copy()
+focus_left, focus_right = st.columns([1.1, 1])
+focus_metric_1, focus_metric_2, focus_metric_3, focus_metric_4, focus_metric_5 = focus_right.columns(5)
+focus_metric_1.metric("Priority", str(focus_row["strategy_priority"]))
+focus_metric_2.metric("Primary driver", str(focus_row["primary_driver"]))
+focus_metric_3.metric("Health score", _format_value(focus_row["strategic_health_score"]))
+focus_metric_4.metric("Transition gap", _format_value(focus_row["transition_gap"]))
+focus_metric_5.metric("Total generation", _format_value(focus_row["total_generation_mwh"], decimals=0))
 
-heatmap_source = heatmap_source.rename(
-    columns={
-        "respondent": "Utility",
-        "score_carbon": "Carbon position",
-        "score_renewable": "Renewable position",
-        "score_gas": "Gas resilience",
-        "score_clean": "Clean coverage",
-        "score_diversity": "Fuel diversity",
-    }
+focus_right.markdown(
+    f"""
+    <div class="usd-note">
+        <strong>{focus_row['location_name'] or focus_row['location']}</strong> is currently
+        <strong>{focus_row['strategy_priority']}</strong>. Its main structural drag is
+        <strong>{focus_row['primary_driver'].lower()}</strong>. Its strongest relative position is
+        <strong>{focus_row['best_position'].lower()}</strong>.
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
-
-heatmap_matrix = heatmap_source.set_index("Utility")[
-    [
-        "Carbon position",
-        "Renewable position",
-        "Gas resilience",
-        "Clean coverage",
-        "Fuel diversity",
-    ]
-]
-
-heatmap_values = heatmap_matrix.to_numpy(dtype=float)
-valid_values = heatmap_values[~np.isnan(heatmap_values)]
-
-if valid_values.size == 0:
-    st.info("No heatmap data is available for the selected filters.")
+portfolio_medians = {column: latest_location_df[column].dropna().median() for column in FUEL_SCORE_COLUMNS}
+if single_location_mode:
+    focus_left.plotly_chart(
+        _style_figure(_score_breakdown_chart(focus_row), height=430),
+        use_container_width=True,
+    )
 else:
-    zmin = float(np.nanpercentile(valid_values, 5))
-    zmax = float(np.nanpercentile(valid_values, 95))
-
-    if zmin == zmax:
-        zmin = max(0.0, zmin - 1.0)
-        zmax = min(100.0, zmax + 1.0)
-
-    flat_cols = [
-        col
-        for col in heatmap_matrix.columns
-        if heatmap_matrix[col].nunique(dropna=True) <= 1
-    ]
-
-    if flat_cols:
-        st.warning(f"No variation detected in: {', '.join(flat_cols)}")
-
-    fig_heatmap = go.Figure(
-        data=go.Heatmap(
-            z=heatmap_matrix.values,
-            x=heatmap_matrix.columns,
-            y=heatmap_matrix.index,
-            colorscale=[
-                [0, "#7f1d1d"],
-                [0.5, "#f59e0b"],
-                [1, "#10b981"],
-            ],
-            zmin=zmin,
-            zmax=zmax,
-            colorbar=dict(title="Score"),
-            hovertemplate=(
-                "Utility: %{y}<br>" "Metric: %{x}<br>" "Score: %{z:.1f}<extra></extra>"
-            ),
-        )
-    )
-
-    fig_heatmap.update_layout(
-        plot_bgcolor=COLOR_BG,
-        paper_bgcolor=COLOR_BG,
-        font_color=COLOR_WHITE,
-        margin=dict(l=10, r=10, t=55, b=10),
-    )
-
-    st.plotly_chart(fig_heatmap, use_container_width=True)
+    focus_left.plotly_chart(_radar_chart(focus_row, portfolio_medians), use_container_width=True)
 
 st.divider()
 
-# ---------------------------------------------------------------------------
-# Focus respondent summary
-# ---------------------------------------------------------------------------
+st.subheader("Momentum")
+renewable_label, renewable_delta = trend_label(focus_df["renewable_share_pct"], higher_is_better=True)
+gas_label, gas_delta = trend_label(focus_df["gas_share_pct"], higher_is_better=False)
+coal_label, coal_delta = trend_label(focus_df["coal_share_pct"], higher_is_better=False)
+diversity_label, diversity_delta = trend_label(focus_df["fuel_diversity_index"], higher_is_better=True)
+heat_label, heat_delta = trend_label(focus_df["weighted_heat_rate_btu_per_kwh"], higher_is_better=False)
 
-st.subheader(f"Board Packet: {focus_respondent}")
+trend_metrics = st.columns(5)
+trend_metrics[0].metric("Renewable", renewable_label, _metric_delta(renewable_delta, "%"))
+trend_metrics[1].metric("Gas", gas_label, _metric_delta(gas_delta, "%"))
+trend_metrics[2].metric("Coal", coal_label, _metric_delta(coal_delta, "%"))
+trend_metrics[3].metric("Diversity", diversity_label, _metric_delta(diversity_delta))
+trend_metrics[4].metric("Heat rate", heat_label, _metric_delta(heat_delta))
 
-focus_latest = latest_snapshot_df[
-    latest_snapshot_df["respondent"] == focus_respondent
-].copy()
-
-if focus_latest.empty:
-    st.info("No latest summary is available for the selected utility.")
+if focus_df["period"].nunique() < 2:
+    st.info("Historical trend charts will become useful after more monthly backfill lands. Right now the platinum table only has one month for this location.")
 else:
-    focus_row = focus_latest.iloc[0]
+    trend_col1, trend_col2 = st.columns(2)
+    trend_col3, trend_col4 = st.columns(2)
 
-    score_medians = {
-        key: latest_snapshot_df[key].dropna().median()
-        for key in RISK_LABELS
-    }
-    weakest_area = _dominant_signal(focus_row, "risk")
-    strongest_area = _dominant_signal(focus_row, "strength")
-
-    summary_left, summary_right = st.columns([1.1, 1])
-    summary_left.plotly_chart(
-        _build_radar_figure(focus_row, score_medians),
+    trend_col1.plotly_chart(
+        _style_figure(
+            px.line(
+                focus_df,
+                x="period",
+                y="renewable_share_pct",
+                markers=True,
+                labels={"period": "Period", "renewable_share_pct": "Renewable share (%)"},
+                title="Renewable share trend",
+            ),
+            height=320,
+        ),
+        use_container_width=True,
+    )
+    trend_col2.plotly_chart(
+        _style_figure(
+            px.line(
+                focus_df,
+                x="period",
+                y="gas_share_pct",
+                markers=True,
+                labels={"period": "Period", "gas_share_pct": "Gas share (%)"},
+                title="Gas share trend",
+            ),
+            height=320,
+        ),
+        use_container_width=True,
+    )
+    trend_col3.plotly_chart(
+        _style_figure(
+            px.line(
+                focus_df,
+                x="period",
+                y="coal_share_pct",
+                markers=True,
+                labels={"period": "Period", "coal_share_pct": "Coal share (%)"},
+                title="Coal share trend",
+            ),
+            height=320,
+        ),
+        use_container_width=True,
+    )
+    trend_col4.plotly_chart(
+        _style_figure(
+            px.line(
+                focus_df,
+                x="period",
+                y="fuel_diversity_index",
+                markers=True,
+                labels={"period": "Period", "fuel_diversity_index": "Fuel diversity"},
+                title="Fuel diversity trend",
+            ),
+            height=320,
+        ),
+        use_container_width=True,
+    )
+    st.plotly_chart(
+        _style_figure(
+            px.line(
+                focus_df,
+                x="period",
+                y="weighted_heat_rate_btu_per_kwh",
+                markers=True,
+                labels={"period": "Period", "weighted_heat_rate_btu_per_kwh": "Heat rate"},
+                title="Heat rate trend",
+            ),
+            height=320,
+        ),
         use_container_width=True,
     )
 
-    summary_right.markdown(
-        f"""
-        <div class="usd-focus-note">
-            <strong>{focus_row['respondent_name'] or focus_row['respondent']}</strong> is currently
-            classified as <strong>{focus_row['strategy_priority']}</strong>. Its biggest structural drag
-            is <strong>{weakest_area.lower()}</strong>, while its strongest relative position is
-            <strong>{strongest_area.lower()}</strong>.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    summary_col1, summary_col2, summary_col3, summary_col4 = summary_right.columns(4)
-    summary_col1.metric("Priority", str(focus_row["strategy_priority"]))
-    summary_col2.metric("Health score", f"{focus_row['strategic_health_score']:.1f}")
-    summary_col3.metric("Transition gap", f"{focus_row['transition_gap']:.1f}")
-    summary_col4.metric("Renewable share", f"{focus_row['renewable_share_pct']:.1f}%")
-
-    st.caption(
-        "This summary shows the selected utility’s current long-term position based on the latest strategic snapshot."
-    )
-
 st.divider()
 
-# ---------------------------------------------------------------------------
-# Trend section
-# ---------------------------------------------------------------------------
+with st.expander("Supporting evidence", expanded=False):
+    evidence_left, evidence_right = st.columns([1.2, 1])
 
-st.subheader(f"How {focus_respondent} is moving over time")
-
-st.caption(
-    "These trends show whether the selected utility is moving in a stronger or weaker strategic direction."
-)
-
-carbon_df = focus_df.dropna(subset=["carbon_intensity_kg_per_mwh"]).copy()
-renewable_df = focus_df.dropna(subset=["renewable_share_pct"]).copy()
-gas_df = focus_df.dropna(subset=["peak_hour_gas_share_pct"]).copy()
-clean_df = focus_df.dropna(subset=["clean_coverage_ratio"]).copy()
-
-carbon_label, carbon_delta = _trend_delta_label(
-    (
-        carbon_df["carbon_intensity_kg_per_mwh"]
-        if not carbon_df.empty
-        else pd.Series(dtype=float)
-    ),
-    higher_is_better=False,
-)
-
-renewable_label, renewable_delta = _trend_delta_label(
-    (
-        renewable_df["renewable_share_pct"]
-        if not renewable_df.empty
-        else pd.Series(dtype=float)
-    ),
-    higher_is_better=True,
-)
-
-gas_label, gas_delta = _trend_delta_label(
-    gas_df["peak_hour_gas_share_pct"] if not gas_df.empty else pd.Series(dtype=float),
-    higher_is_better=False,
-)
-
-clean_label, clean_delta = _trend_delta_label(
-    clean_df["clean_coverage_ratio"] if not clean_df.empty else pd.Series(dtype=float),
-    higher_is_better=True,
-)
-
-trend_status_col1, trend_status_col2, trend_status_col3, trend_status_col4 = st.columns(
-    4
-)
-trend_status_col1.metric(
-    "Carbon direction", carbon_label, _metric_delta_text(carbon_delta)
-)
-trend_status_col2.metric(
-    "Renewable direction", renewable_label, _metric_delta_text(renewable_delta, "%")
-)
-trend_status_col3.metric("Gas direction", gas_label, _metric_delta_text(gas_delta, "%"))
-trend_status_col4.metric(
-    "Clean direction", clean_label, _metric_delta_text(clean_delta)
-)
-
-trend_col1, trend_col2 = st.columns(2)
-
-if carbon_df.empty:
-    trend_col1.info("No carbon data is available for this utility.")
-else:
-    fig_carbon_trend = px.line(
-        carbon_df,
-        x="date",
-        y="carbon_intensity_kg_per_mwh",
-        markers=True,
-        color_discrete_sequence=[COLOR_ORANGE],
-        labels={
-            "date": "Date",
-            "carbon_intensity_kg_per_mwh": "Carbon intensity (kg/MWh)",
-        },
-        title=f"Carbon Intensity Trend ({carbon_label})",
+    detail_display = latest_location_df[
+        [
+            "location",
+            "location_name",
+            "strategy_priority",
+            "primary_driver",
+            "reported_cost_coverage_pct",
+            "reported_avg_fuel_cost_usd",
+            "renewable_share_pct",
+            "gas_share_pct",
+            "coal_share_pct",
+            "nuclear_share_pct",
+            "largest_fuel_share_pct",
+            "fuel_diversity_index",
+            "weighted_heat_rate_btu_per_kwh",
+        ]
+    ].rename(
+        columns={
+            "location": "Location",
+            "location_name": "Name",
+            "strategy_priority": "Priority",
+            "primary_driver": "Primary driver",
+            "reported_cost_coverage_pct": "Cost coverage (%)",
+            "reported_avg_fuel_cost_usd": "Avg fuel cost",
+            "renewable_share_pct": "Renewable share (%)",
+            "gas_share_pct": "Gas share (%)",
+            "coal_share_pct": "Coal share (%)",
+            "nuclear_share_pct": "Nuclear share (%)",
+            "largest_fuel_share_pct": "Largest fuel share (%)",
+            "fuel_diversity_index": "Fuel diversity",
+            "weighted_heat_rate_btu_per_kwh": "Heat rate",
+        }
     )
-    fig_carbon_trend.update_traces(line=dict(width=3), marker=dict(size=8))
-    fig_carbon_trend = style_figure(fig_carbon_trend)
-    trend_col1.plotly_chart(fig_carbon_trend, use_container_width=True)
-    trend_col1.caption(_trend_explanation("carbon", carbon_label))
-
-if renewable_df.empty:
-    trend_col2.info("No renewable data is available for this utility.")
-else:
-    fig_renewable_trend = px.line(
-        renewable_df,
-        x="date",
-        y="renewable_share_pct",
-        markers=True,
-        color_discrete_sequence=[COLOR_AQUA],
-        labels={"date": "Date", "renewable_share_pct": "Renewable share (%)"},
-        title=f"Renewable Share Trend ({renewable_label})",
+    evidence_left.dataframe(
+        detail_display.style.map(_color_priority, subset=["Priority"]),
+        use_container_width=True,
+        hide_index=True,
+        height=420,
     )
-    fig_renewable_trend.update_traces(line=dict(width=3), marker=dict(size=8))
-    fig_renewable_trend = style_figure(fig_renewable_trend)
-    trend_col2.plotly_chart(fig_renewable_trend, use_container_width=True)
-    trend_col2.caption(_trend_explanation("renewable", renewable_label))
 
-trend_col3, trend_col4 = st.columns(2)
-
-if gas_df.empty:
-    trend_col3.info("No gas dependence data is available for this utility.")
-else:
-    fig_gas_trend = px.line(
-        gas_df,
-        x="date",
-        y="peak_hour_gas_share_pct",
-        markers=True,
-        color_discrete_sequence=[COLOR_ORANGE],
-        labels={"date": "Date", "peak_hour_gas_share_pct": "Peak gas dependence (%)"},
-        title=f"Peak Gas Dependence Trend ({gas_label})",
+    heatmap_df = latest_location_df[
+        ["location"] + FUEL_SCORE_COLUMNS
+    ].rename(columns={"location": "Location", **SCORE_LABELS})
+    fig_heatmap = go.Figure(
+        data=go.Heatmap(
+            z=heatmap_df[list(SCORE_LABELS.values())].values,
+            x=list(SCORE_LABELS.values()),
+            y=heatmap_df["Location"],
+            colorscale=[[0, "#7f1d1d"], [0.5, "#f59e0b"], [1, "#10b981"]],
+            zmin=0,
+            zmax=100,
+            colorbar=dict(title="Score"),
+            hovertemplate="Location: %{y}<br>Metric: %{x}<br>Score: %{z:.1f}<extra></extra>",
+        )
     )
-    fig_gas_trend.update_traces(line=dict(width=3), marker=dict(size=8))
-    fig_gas_trend = style_figure(fig_gas_trend)
-    trend_col3.plotly_chart(fig_gas_trend, use_container_width=True)
-    trend_col3.caption(_trend_explanation("gas", gas_label))
+    evidence_right.plotly_chart(_style_figure(fig_heatmap, height=420), use_container_width=True)
 
-if clean_df.empty:
-    trend_col4.info("No clean coverage data is available for this utility.")
-else:
-    fig_clean_trend = px.line(
-        clean_df,
-        x="date",
-        y="clean_coverage_ratio",
-        markers=True,
-        color_discrete_sequence=[COLOR_AQUA],
-        labels={"date": "Date", "clean_coverage_ratio": "Clean coverage ratio"},
-        title=f"Clean Coverage Trend ({clean_label})",
+    cost_detail_df = latest_power_df[latest_power_df["cost_usd"].notna()].copy()
+    cost_detail_df["is_rollup_fuel"] = cost_detail_df.apply(
+        lambda row: is_rollup_fuel(row.get("fueltype_id"), row.get("fueltype_name")),
+        axis=1,
     )
-    fig_clean_trend.update_traces(line=dict(width=3), marker=dict(size=8))
-    fig_clean_trend = style_figure(fig_clean_trend)
-    trend_col4.plotly_chart(fig_clean_trend, use_container_width=True)
-    trend_col4.caption(_trend_explanation("clean", clean_label))
+    if (~cost_detail_df["is_rollup_fuel"]).any():
+        cost_detail_df = cost_detail_df[~cost_detail_df["is_rollup_fuel"]]
+    if not cost_detail_df.empty:
+        cost_detail_df["fuel_bucket"] = cost_detail_df.apply(
+            lambda row: map_fuel_bucket(row.get("fueltype_id"), row.get("fueltype_name")),
+            axis=1,
+        )
+        st.subheader("Latest fuel cost detail")
+        st.dataframe(
+            cost_detail_df[
+                [
+                    "period",
+                    "location",
+                    "location_name",
+                    "sector_name",
+                    "fueltype_name",
+                    "fuel_bucket",
+                    "generation_mwh",
+                    "cost_usd",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
 
-st.divider()
+    st.download_button(
+        label=f"Download {focus_location} strategy history as CSV",
+        data=focus_df.to_csv(index=False).encode("utf-8"),
+        file_name=f"{focus_location.lower()}_utility_strategy_history.csv",
+        mime="text/csv",
+    )
 
-# ---------------------------------------------------------------------------
-# Client-friendly explanation block
-# ---------------------------------------------------------------------------
-
-with st.expander("How to explain this page to a client", expanded=False):
-    st.markdown("""
-This page helps show which utilities are stronger or weaker from a long-term strategic perspective.
-
-It looks at:
-- carbon exposure
-- renewable adoption
-- gas dependence during peak demand
-- clean coverage
-- portfolio diversity
-
-The goal is to help leadership quickly see:
-- where future risk may be building
-- which utilities need attention first
-- which utilities are improving
-- and which ones may need stronger transition planning
-""")
-
-with st.expander("How to explain trend charts to a client", expanded=False):
-    st.markdown("""
-### Carbon Intensity Trend
-- If the line goes **up**, the utility is becoming more carbon intensive.
-- If the line goes **down**, the utility is becoming cleaner.
-- If the line is **flat**, carbon exposure is not materially changing.
-
-### Renewable Share Trend
-- If the line goes **up**, renewable usage is improving.
-- If the line goes **down**, renewable positioning is getting weaker.
-- If the line is **flat**, clean energy adoption is not materially changing.
-
-### Peak Gas Dependence Trend
-- If the line goes **up**, the utility is becoming more dependent on gas during stress periods.
-- If the line goes **down**, gas dependence is improving.
-- If the line is **flat**, gas reliance is not materially changing.
-
-### Clean Coverage Trend
-- If the line goes **up**, clean energy is covering more demand.
-- If the line goes **down**, clean energy support is weakening.
-- If the line is **flat**, clean coverage is not materially changing.
-
-### Best overall story
-A strong utility is not just one that looks good today — it is one that is moving in the right direction over time.
-""")
-
-# ---------------------------------------------------------------------------
-# Operational status
-# ---------------------------------------------------------------------------
-
-st.subheader("Operational Status")
-
-with st.expander("Backfill Status", expanded=False):
+    st.subheader("Operational status")
     status_df = get_backfill_status()
     if status_df.empty:
         st.info("No backfill jobs have been queued yet.")

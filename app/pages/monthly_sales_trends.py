@@ -5,6 +5,9 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+import os
+from dotenv import load_dotenv
+import snowflake.connector
 
 st.set_page_config(page_title="Monthly Sales Trends · EIA Analytics", layout="wide")
 
@@ -17,62 +20,57 @@ st.caption(
 
 
 # ── Data loading (stub — replace with real connection logic) ──────────────────
+load_dotenv()
+
 @st.cache_data(ttl=3600)
 def load_sales_data() -> pd.DataFrame:
     """
-    TODO: Replace this stub with your actual database/Snowflake query.
-
-    Expected columns after cleaning:
-        PERIOD           datetime  — monthly period (e.g. 2024-01-01)
-        STATEDESCRIPTION str       — full state name
-        STATEID          str       — two-letter state abbreviation
-        SECTORNAME       str       — e.g. "residential", "commercial", "industrial"
-        CUSTOMERS        float     — number of customers
-        PRICE            float     — average retail price (cents/kWh)
-        REVENUE          float     — revenue (million $)
-        SALES            float     — sales (million kWh)
-
-    Example stub generates synthetic data so the layout renders immediately.
+    Loads electricity retail sales data from Snowflake.
+    Table: ELECTRICITY_RETAIL_SALES_BRONZE
     """
-    rng = np.random.default_rng(42)
+    conn = snowflake.connector.connect(
+        account=os.getenv("SNOWFLAKE_ACCOUNT"),
+        user=os.getenv("SNOWFLAKE_USER"),
+        password=os.getenv("SNOWFLAKE_PASSWORD"),
+        database=os.getenv("SNOWFLAKE_DATABASE"),
+        schema=os.getenv("SNOWFLAKE_SCHEMA"),
+        warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
+        role=os.getenv("SNOWFLAKE_ROLE"),
+    )
 
-    sectors = ["residential", "commercial", "industrial", "transportation"]
-    states = {
-        "California": "CA", "Texas": "TX", "Florida": "FL",
-        "New York": "NY", "Illinois": "IL", "Pennsylvania": "PA",
-        "Ohio": "OH", "Georgia": "GA", "Michigan": "MI", "Washington": "WA",
+    query = """
+        SELECT
+            TO_DATE(period, 'YYYY-MM')  AS PERIOD,
+            state                       AS STATEID,
+            sector                      AS SECTORNAME,
+            customers                   AS CUSTOMERS,
+            price                       AS PRICE,
+            revenue                     AS REVENUE,
+            sales                       AS SALES
+        FROM ELECTRICITY_RETAIL_SALES_BRONZE
+        ORDER BY period DESC
+    """
+
+    result_df = pd.read_sql(query, conn)
+    result_df.columns = result_df.columns.str.upper()
+    conn.close()
+
+    # Map state abbreviations to full names for the dashboard
+    state_map = {
+        "CA": "California", "TX": "Texas", "FL": "Florida",
+        "NY": "New York", "IL": "Illinois", "PA": "Pennsylvania",
+        "OH": "Ohio", "GA": "Georgia", "MI": "Michigan", "WA": "Washington",
+        "AZ": "Arizona", "CO": "Colorado", "NC": "North Carolina",
+        "VA": "Virginia", "NJ": "New Jersey", "TN": "Tennessee",
+        "IN": "Indiana", "MO": "Missouri", "MD": "Maryland", "WI": "Wisconsin",
     }
-    periods = pd.date_range("2022-01-01", periods=36, freq="MS")
+    result_df["STATEDESCRIPTION"] = result_df["STATEID"].map(state_map).fillna(result_df["STATEID"])
 
-    rows = []
-    for period in periods:
-        for state, abbr in states.items():
-            for sector in sectors:
-                base_sales = {
-                    "residential": 800,
-                    "commercial": 500,
-                    "industrial": 300,
-                    "transportation": 20,
-                }[sector]
-                month_mult = 1 + 0.25 * np.sin((period.month - 1) * np.pi / 6)
-                sales = base_sales * month_mult * rng.uniform(0.9, 1.1)
-                revenue = sales * rng.uniform(0.10, 0.14)
-                price = (revenue / sales) * 100
-                customers = sales * rng.uniform(0.8, 1.2) * 1000
+    # Normalize
+    result_df["SECTORNAME"] = result_df["SECTORNAME"].str.lower()
+    result_df["PERIOD"] = pd.to_datetime(result_df["PERIOD"])
 
-                rows.append(dict(
-                    PERIOD=period,
-                    STATEDESCRIPTION=state,
-                    STATEID=abbr,
-                    SECTORNAME=sector,
-                    SALES=round(sales, 2),
-                    REVENUE=round(revenue, 2),
-                    PRICE=round(price, 4),
-                    CUSTOMERS=round(customers),
-                ))
-
-    return pd.DataFrame(rows)
-
+    return result_df
 
 with st.spinner("Loading sales data…"):
     df = load_sales_data()
@@ -118,7 +116,7 @@ with st.sidebar:
         "Primary metric",
         options=["SALES", "REVENUE", "PRICE", "CUSTOMERS"],
         format_func=lambda m: {
-            "SALES": "Sales (million kWh)",
+            "SALES": "Sales (MWh)",
             "REVENUE": "Revenue (million $)",
             "PRICE": "Avg Price (cents/kWh)",
             "CUSTOMERS": "Customers",
@@ -148,7 +146,7 @@ if fdf.empty:
     st.stop()
 
 METRIC_LABELS = {
-    "SALES": "Sales (million kWh)",
+    "SALES": "Sales (MWh)",
     "REVENUE": "Revenue (million $)",
     "PRICE": "Avg Price (cents/kWh)",
     "CUSTOMERS": "Customers",
@@ -156,10 +154,10 @@ METRIC_LABELS = {
 metric_label = METRIC_LABELS[metric]
 
 METRIC_TICK_FORMAT = {
-    "SALES":     {"ticksuffix": " M kWh", "tickprefix": ""},
-    "REVENUE":   {"ticksuffix": " M",     "tickprefix": "$"},
-    "PRICE":     {"ticksuffix": " ¢",     "tickprefix": ""},
-    "CUSTOMERS": {"ticksuffix": "",       "tickprefix": ""},
+    "SALES":     {"ticksuffix": " MWh", "tickprefix": ""},
+    "REVENUE":   {"ticksuffix": " M",   "tickprefix": "$"},
+    "PRICE":     {"ticksuffix": " ¢",   "tickprefix": ""},
+    "CUSTOMERS": {"ticksuffix": "",      "tickprefix": ""},
 }
 tick_fmt = METRIC_TICK_FORMAT[metric]
 
@@ -183,7 +181,7 @@ if len(monthly_total) >= 2:
 else:
     delta_str = None
 
-kpi1.metric("Total Sales", f"{total_sales:,.0f} M kWh", delta=delta_str)
+kpi1.metric("Total Sales", f"{total_sales:,.0f} MWh", delta=delta_str)
 kpi2.metric("Total Revenue", f"${total_revenue:,.0f} M")
 kpi3.metric("Avg Retail Price", f"{avg_price:.2f} ¢/kWh")
 kpi4.metric("Total Customers", f"{total_customers:,.0f}")

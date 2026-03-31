@@ -202,7 +202,7 @@ with col_line:
         labels={"PERIOD": "Month", metric: metric_label, "SECTORNAME": "Sector"},
         template="plotly_white",
     )
-    fig_line.update_traces(line_width=2, marker_size=5)
+    fig_line.update_traces(line_width=2, marker_size=5, fill="tozeroy", fillcolor="rgba(0,0,0,0.08)")
     fig_line.update_layout(legend_title_text="Sector", height=380)
     st.plotly_chart(fig_line, use_container_width=True)
 

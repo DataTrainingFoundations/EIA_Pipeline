@@ -1,34 +1,6 @@
 """
 gold_serving.py
 ===============
-Spark Job: Gold Layer (consolidated)
--------------------------------------
-Reads clean Parquet from MinIO silver/ and writes ALL serving tables
-directly to MinIO gold/ in a single pass.
-
-This replaces the old two-step gold_to_postgres.py → platinum_serving_tables.py
-pattern.  The outputs are denormalized and typed to match the PostgreSQL
-warehouse schema (002_platinum_schema.sql) exactly, so the Airflow
-eia_gold DAG can upsert them straight into Postgres with no further
-transformation.
-
-INPUT PATHS
------------
-    s3a://silver/eia/electricity_generation/date=<date>/
-    s3a://silver/eia/electricity_demand/date=<date>/
-
-OUTPUT PATHS (all in the gold bucket)
---------------------------------------
-    gold/eia/fact_generation_hourly/date=<date>/
-    gold/eia/fact_demand_hourly/date=<date>/
-    gold/eia/dim_balancing_authority/date=<date>/
-    gold/eia/dim_fuel_type/date=<date>/
-    gold/eia/agg_daily_generation/date=<date>/
-    gold/eia/agg_daily_demand_peak/date=<date>/
-
-USAGE
------
-    spark-submit gold_serving.py --date 2024-03-15
 
 ADDING NEW SERVING TABLES
 --------------------------
@@ -43,23 +15,10 @@ import argparse
 import logging
 import os
 
-# from pyspark.sql import DataFrame, SparkSession
-# from pyspark.sql.functions import (
-#     col,
-#     concat_ws,
-#     current_timestamp,
-#     lit,
-#     max as spark_max,
-#     md5,
-#     round as spark_round,
-#     sum as spark_sum,
-#     to_date,
-# )
-
-from snowflake.snowpark import Session
+from snowflake.snowpark import DataFrame, Session
 from snowflake.snowpark.functions import (
     col,
-    concat_ws,
+    concat,
     current_timestamp,
     lit,
     max as spark_max,
@@ -78,46 +37,46 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 # MINIO_PASSWORD = os.environ.get("MINIO_ROOT_PASSWORD", "minioadmin")
 
 # GOLD_BASE = "s3a://gold/eia"
-
+SF_DB = os.environ.get("SNOWFLAKE_DATABASE", "EIA")
 
 # ── Spark session ──────────────────────────────────────────────────────────────
 
-def _build_spark(app_name: str) -> SparkSession:
-    return (
-        SparkSession.builder
-        .appName(app_name)
-        .master(os.environ.get("SPARK_MASTER", "spark://spark-master:7077"))
-        .config(
-            "spark.jars.packages",
-            "org.apache.hadoop:hadoop-aws:3.4.2,"
-            "com.amazonaws:aws-java-sdk-bundle:1.12.262",
-        )
-        .config("spark.hadoop.fs.s3a.endpoint", MINIO_ENDPOINT)
-        .config("spark.hadoop.fs.s3a.access.key", MINIO_USER)
-        .config("spark.hadoop.fs.s3a.secret.key", MINIO_PASSWORD)
-        .config("spark.hadoop.fs.s3a.path.style.access", "true")
-        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-        .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
-        .getOrCreate()
+def _build_snowpark():
+    connection_params = {
+        "account":   os.environ["SNOWFLAKE_ACCOUNT"],
+        "user":      os.environ["SNOWFLAKE_USER"],
+        "password":  os.environ["SNOWFLAKE_PASSWORD"],
+        "role":      os.environ.get("SNOWFLAKE_ROLE",      "SYSADMIN"),
+        "warehouse": os.environ.get("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
+        "database":  os.environ.get("SNOWFLAKE_DATABASE",  "EIA"),
+        "schema":    "SILVER"
+    }
+    session = Session.builder.configs(connection_params).create()
+    logger.info(
+        "Snowpark session opened → %s.%s",
+        connection_params["database"],
+        connection_params["schema"],
     )
+    return session
 
 
 # ── Writer ─────────────────────────────────────────────────────────────────────
 
-def _write(df: DataFrame, table_name: str, date: str) -> None:
-    """Write a serving DataFrame to MinIO gold/ with snappy compression."""
-    path = f"{GOLD_BASE}/{table_name}/date={date}"
-    out  = df.withColumn("gold_processed_at", current_timestamp())
-    n    = out.count()
-    logger.info("Writing %s: %d rows → %s", table_name, n, path)
+def _write(df, table_name: str):
+    """Write to Snowflake GOLD schema"""
+    out = df.withColumn("gold_processed_at", current_timestamp())
+
+    full_table = f"{SF_DB}.GOLD.{table_name.upper()}"
+
+    logger.info("Writing → %s", full_table)
+
     (
         out.write
         .mode("overwrite")
-        .format("parquet")
-        .option("compression", "snappy")
-        .save(path)
+        .save_as_table(full_table)
     )
-    logger.info("Done → %s", path)
+
+    logger.info("Done → %s", full_table)
 
 
 # ── Serving table builders ─────────────────────────────────────────────────────
@@ -128,7 +87,6 @@ def _build_dim_balancing_authority(
     date: str,
 ) -> None:
     """dim_balancing_authority — unique BA codes + names from both datasets."""
-    from pyspark.sql import functions as F
 
     gen_bas = gen_df.select(
         col("respondent").alias("ba_code"),
@@ -143,7 +101,7 @@ def _build_dim_balancing_authority(
         .dropDuplicates(["ba_code"])
         .orderBy("ba_code")
     )
-    _write(dim, "dim_balancing_authority", date)
+    _write(dim, "dim_balancing_authority")
 
 
 def _build_dim_fuel_type(gen_df: DataFrame, date: str) -> None:
@@ -156,7 +114,7 @@ def _build_dim_fuel_type(gen_df: DataFrame, date: str) -> None:
         .dropDuplicates(["fuel_code"])
         .orderBy("fuel_code")
     )
-    _write(dim, "dim_fuel_type", date)
+    _write(dim, "dim_fuel_type")
 
 
 def _build_fact_generation_hourly(gen_df: DataFrame, date: str) -> None:
@@ -171,17 +129,24 @@ def _build_fact_generation_hourly(gen_df: DataFrame, date: str) -> None:
         .agg(spark_round(spark_sum("value_gwh"), 4).alias("generation_gwh"))
     )
     fact = agg.select(
-        md5(concat_ws("|", col("period_ts").cast("string"), col("respondent"), col("fueltype")))
-            .alias("record_id"),
-        col("period_ts"),
-        col("respondent").alias("ba_code"),
-        col("respondent_name").alias("ba_name"),
-        col("fueltype").alias("fuel_code"),
-        col("fuel_type_name").alias("fuel_name"),
-        col("generation_gwh"),
+        md5(
+            concat(
+                col("PERIOD_TS"),
+                lit("|"),
+                col("RESPONDENT"),
+                lit("|"),
+                col("FUELTYPE")
+            )
+        ).alias("record_id"),
+        col("PERIOD_TS"),
+        col("RESPONDENT").alias("ba_code"),
+        col("RESPONDENT_NAME").alias("ba_name"),
+        col("FUELTYPE").alias("fuel_code"),
+        col("FUEL_TYPE_NAME").alias("fuel_name"),
+        col("GENERATION_GWH"),
         lit(date).alias("partition_date"),
     )
-    _write(fact, "fact_generation_hourly", date)
+    _write(fact, "fact_generation_hourly")
 
 
 def _build_fact_demand_hourly(dem_df: DataFrame, date: str) -> None:
@@ -192,28 +157,33 @@ def _build_fact_demand_hourly(dem_df: DataFrame, date: str) -> None:
     """
     demand = (
         dem_df.filter(col("type") == "D")
-        .groupBy("period_ts", "respondent", "respondent_name")
-        .agg(spark_round(spark_sum("value_gwh"), 4).alias("demand_gwh"))
+        .groupBy("PERIOD_TS", "RESPONDENT", "RESPONDENT_NAME")
+        .agg(spark_round(spark_sum("VALUE_GWH"), 4).alias("demand_gwh"))
     )
     forecast = (
         dem_df.filter(col("type") == "DF")
-        .groupBy("period_ts", "respondent")
-        .agg(spark_round(spark_sum("value_gwh"), 4).alias("forecast_gwh"))
+        .groupBy("PERIOD_TS", "RESPONDENT")
+        .agg(spark_round(spark_sum("VALUE_GWH"), 4).alias("forecast_gwh"))
     )
     fact = (
-        demand.join(forecast, on=["period_ts", "respondent"], how="left")
+        demand.join(forecast, on=["PERIOD_TS", "RESPONDENT"], how="left")
         .select(
-            md5(concat_ws("|", col("period_ts").cast("string"), col("respondent")))
-                .alias("record_id"),
-            col("period_ts"),
-            col("respondent").alias("ba_code"),
-            col("respondent_name").alias("ba_name"),
+            md5(
+                concat(
+                    col("PERIOD_TS"),
+                    lit("|"),
+                    col("RESPONDENT"),
+                )
+            ).alias("record_id"),
+            col("PERIOD_TS"),
+            col("RESPONDENT").alias("ba_code"),
+            col("RESPONDENT_NAME").alias("ba_name"),
             col("demand_gwh"),
             col("forecast_gwh"),
             lit(date).alias("partition_date"),
         )
     )
-    _write(fact, "fact_demand_hourly", date)
+    _write(fact, "fact_demand_hourly")
 
 
 def _build_agg_daily_generation(gen_df: DataFrame, date: str) -> None:
@@ -234,7 +204,7 @@ def _build_agg_daily_generation(gen_df: DataFrame, date: str) -> None:
         )
         .orderBy("report_date", "fuel_code")
     )
-    _write(agg, "agg_daily_generation", date)
+    _write(agg, "agg_daily_generation")
 
 
 def _build_agg_daily_demand_peak(dem_df: DataFrame, date: str) -> None:
@@ -256,28 +226,23 @@ def _build_agg_daily_demand_peak(dem_df: DataFrame, date: str) -> None:
         )
         .orderBy("report_date", "ba_code")
     )
-    _write(agg, "agg_daily_demand_peak", date)
+    _write(agg, "agg_daily_demand_peak")
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def run(date: str) -> None:
-    spark = _build_spark(f"gold_serving_{date}")
+    session = _build_snowpark()
     logger.info("Building gold serving tables for date: %s", date)
 
     # ── Read silver inputs ────────────────────────────────────────────────────
-    gen_path = f"s3a://silver/eia/electricity_generation/date={date}"
-    dem_path = f"s3a://silver/eia/electricity_demand/date={date}"
+    gen_df = session.table("SILVER_ELECTRICITY_GENERATION")
+    dem_df = session.table("SILVER_ELECTRICITY_DEMAND")
 
-    logger.info("Reading generation silver: %s", gen_path)
-    gen_df = spark.read.parquet(gen_path)
-
-    logger.info("Reading demand silver: %s", dem_path)
-    dem_df = spark.read.parquet(dem_path)
+    gen_df = gen_df.filter(to_date(col("period_ts")) == date)
+    dem_df = dem_df.filter(to_date(col("period_ts")) == date)
 
     # Cache — each DataFrame is read by multiple builders
-    gen_df.cache()
-    dem_df.cache()
 
     # ── Build all serving tables ──────────────────────────────────────────────
     _build_dim_balancing_authority(gen_df, dem_df, date)
@@ -288,7 +253,7 @@ def run(date: str) -> None:
     _build_agg_daily_demand_peak(dem_df, date)
 
     logger.info("All gold serving tables complete for %s", date)
-    spark.stop()
+    session.close()
 
 
 if __name__ == "__main__":

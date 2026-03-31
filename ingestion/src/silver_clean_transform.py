@@ -1,30 +1,11 @@
 """
 silver_clean_transform.py
 =========================
-Spark Job: Silver Layer
------------------------
-Reads raw records from a Snowflake RAW table, cleans and validates them,
-deduplicates, and writes clean Parquet to MinIO silver/.
-
-The MinIO bronze layer is no longer used — Snowflake is the new raw/bronze
-store.  All other silver logic (type coercion, unit normalisation,
-deduplication) is unchanged.
 
 INPUT
 -----
     Snowflake table:  <SNOWFLAKE_DATABASE>.<SNOWFLAKE_SCHEMA>.<TABLE>
     Filtered to rows where: TRY_TO_DATE(_FETCHED_AT) = <date>
-
-OUTPUT
-------
-    s3a://silver/eia/electricity_generation/date=<date>/
-    s3a://silver/eia/electricity_demand/date=<date>/
-
-USAGE
------
-    spark-submit silver_clean_transform.py \
-        --dataset electricity_generation \
-        --date 2024-03-15
 
 ENVIRONMENT VARIABLES (Snowflake Spark connector)
 -------------------------------------------------
@@ -43,17 +24,8 @@ import argparse
 import logging
 import os
 
-# from pyspark.sql import DataFrame, SparkSession
-# from pyspark.sql.functions import (
-#     col,
-#     current_timestamp,
-#     to_timestamp,
-#     trim,
-#     upper,
-#     when,
-# )
 
-from snowflake.snowpark import Session
+from snowflake.snowpark import DataFrame, Session
 from snowflake.snowpark.functions import (
     col,
     current_timestamp,
@@ -67,11 +39,6 @@ from snowflake.snowpark.functions import (
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-
-# ── Config ─────────────────────────────────────────────────────────────────────
-# MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://minio:9000")
-# MINIO_USER     = os.environ.get("MINIO_ROOT_USER", "minioadmin")
-# MINIO_PASSWORD = os.environ.get("MINIO_ROOT_PASSWORD", "minioadmin")
 
 SF_URL      = os.environ.get("SNOWFLAKE_URL", "")
 SF_USER     = os.environ.get("SNOWFLAKE_USER", "")
@@ -93,30 +60,6 @@ DEDUP_COLS = {
     "electricity_demand":     ["PERIOD", "RESPONDENT", "TYPE"],
 }
 
-
-# ── Spark session ──────────────────────────────────────────────────────────────
-
-# def _build_spark(app_name: str) -> SparkSession:
-#     return (
-#         SparkSession.builder
-#         .appName(app_name)
-#         .master(os.environ.get("SPARK_MASTER", "spark://spark-master:7077"))
-#         .config(
-#             "spark.jars.packages",
-#             "org.apache.hadoop:hadoop-aws:3.4.2,"
-#             "com.amazonaws:aws-java-sdk-bundle:1.12.262,"
-#             "net.snowflake:snowflake-jdbc:3.16.1,"
-#             "net.snowflake:spark-snowflake_2.13:2.16.0-spark_3.4",
-#         )
-#         # MinIO / S3A
-#         .config("spark.hadoop.fs.s3a.endpoint", MINIO_ENDPOINT)
-#         .config("spark.hadoop.fs.s3a.access.key", MINIO_USER)
-#         .config("spark.hadoop.fs.s3a.secret.key", MINIO_PASSWORD)
-#         .config("spark.hadoop.fs.s3a.path.style.access", "true")
-#         .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-#         .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
-#         .getOrCreate()
-#     )
 
 def _build_snowpark():
     connection_params = {
@@ -225,6 +168,8 @@ def _clean_demand(df: DataFrame) -> DataFrame:
         .withColumnRenamed("PERIOD",     "period")
         .withColumnRenamed("VALUE",      "value")
     )
+
+###TODO: Add clean _power_operations, and _clean retail_sales
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

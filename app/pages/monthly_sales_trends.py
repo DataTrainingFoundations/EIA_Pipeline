@@ -1,13 +1,13 @@
 """Monthly Sales Trends — EIA Analytics dashboard page."""
-
+import os
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-import os
 from dotenv import load_dotenv
-import snowflake.connector
+from snowflake.snowpark import Session
+from snowflake.snowpark.functions import col, lower
 
 st.set_page_config(page_title="Monthly Sales Trends · EIA Analytics", layout="wide")
 
@@ -25,48 +25,68 @@ load_dotenv()
 @st.cache_data(ttl=3600)
 def load_sales_data() -> pd.DataFrame:
     """
-    Loads electricity retail sales data from Snowflake.
-    Table: ELECTRICITY_RETAIL_SALES_BRONZE
+    # DEBUG
+    raw = session.table("ELECTRICITY_RETAIL_SALES_RAW")
+    print("Row count unfiltered:", raw.count())
+    print("Columns:", raw.columns)
+    print("Unique SECTORID:", raw.select("SECTORID").distinct().collect())
+    print("Unique STATEID sample:", raw.select("STATEID").distinct().collect()[:5])
+    print("Period range:", raw.select("PERIOD").distinct().collect())
+    state_ids = [row["STATEID"] for row in raw.select("STATEID").distinct().collect()]
+    print("All STATEIDs:", sorted(state_ids))
     """
-    conn = snowflake.connector.connect(
-        account=os.getenv("SNOWFLAKE_ACCOUNT"),
-        user=os.getenv("SNOWFLAKE_USER"),
-        password=os.getenv("SNOWFLAKE_PASSWORD"),
-        database=os.getenv("SNOWFLAKE_DATABASE"),
-        schema=os.getenv("SNOWFLAKE_SCHEMA"),
-        warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
-        role=os.getenv("SNOWFLAKE_ROLE"),
-    )
+    session = Session.builder.configs({
+        "account":   os.getenv("SNOWFLAKE_ACCOUNT"),
+        "user":      os.getenv("SNOWFLAKE_USER"),
+        "password":  os.getenv("SNOWFLAKE_PASSWORD"),
+        "database":  os.getenv("SNOWFLAKE_DATABASE"),
+        "schema":    os.getenv("SNOWFLAKE_SCHEMA"),
+        "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE"),
+        "role":      os.getenv("SNOWFLAKE_ROLE"),
+    }).create()
 
-    query = """
-        SELECT
-            TO_DATE(period, 'YYYY-MM')  AS PERIOD,
-            state                       AS STATEID,
-            sector                      AS SECTORNAME,
-            customers                   AS CUSTOMERS,
-            price                       AS PRICE,
-            revenue                     AS REVENUE,
-            sales                       AS SALES
-        FROM ELECTRICITY_RETAIL_SALES_BRONZE
-        ORDER BY period DESC
-    """
-
-    result_df = pd.read_sql(query, conn)
-    result_df.columns = result_df.columns.str.upper()
-    conn.close()
-
-    # Map state abbreviations to full names for the dashboard
-    state_map = {
-        "CA": "California", "TX": "Texas", "FL": "Florida",
-        "NY": "New York", "IL": "Illinois", "PA": "Pennsylvania",
-        "OH": "Ohio", "GA": "Georgia", "MI": "Michigan", "WA": "Washington",
-        "AZ": "Arizona", "CO": "Colorado", "NC": "North Carolina",
-        "VA": "Virginia", "NJ": "New Jersey", "TN": "Tennessee",
-        "IN": "Indiana", "MO": "Missouri", "MD": "Maryland", "WI": "Wisconsin",
+    VALID_STATES = {
+    'AL','AK','AZ','AR','CA','CO','CT','DE','DC','FL','GA','HI','ID',
+    'IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO',
+    'MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA',
+    'RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'
     }
-    result_df["STATEDESCRIPTION"] = result_df["STATEID"].map(state_map).fillna(result_df["STATEID"])
 
-    # Normalize
+    result_df = (
+    session.table("ELECTRICITY_RETAIL_SALES_RAW")
+    .filter(col("SECTORID") != "ALL")
+    .filter(col("STATEID").isin(list(VALID_STATES)))
+    .select("PERIOD", "STATEID", "STATEDESCRIPTION", "SECTORNAME",
+            "CUSTOMERS", "PRICE", "REVENUE", "SALES")
+    .to_pandas()
+    )
+    print("Row count after filter:", len(result_df))
+    session.close()
+
+    numeric_cols = ["CUSTOMERS", "PRICE", "REVENUE", "SALES"]
+    result_df[numeric_cols] = result_df[numeric_cols].apply(pd.to_numeric, errors="coerce")
+    result_df["SECTORNAME"] = result_df["SECTORNAME"].str.lower()
+    result_df["PERIOD"] = pd.to_datetime(result_df["PERIOD"])
+
+    return result_df
+
+@st.cache_data(ttl=3600)
+def load_local_sales_data() -> pd.DataFrame:
+    """
+    FOR LOCAL TESTING: 
+    Load Local Sales Data:
+    Load data from local csv
+    Write to Df
+    Use dataframe to pull pre-defined columns for visualizations
+    """
+    result_df = pd.read_csv(
+        "/Users/ezra/Documents/Python/EIA_Pipeline/ELECTRICITY_SALES_MONTHLY_BRONZE.csv"
+    )
+    result_df = result_df[result_df["STATEID"] != "US"]
+    result_df = result_df[result_df["SECTORNAME"].str.lower() != "all sectors"]
+    numeric_cols = ["CUSTOMERS", "PRICE", "REVENUE", "SALES"]
+    result_df[numeric_cols] = result_df[numeric_cols].apply(pd.to_numeric, errors="coerce")
+    result_df.columns = result_df.columns.str.upper()
     result_df["SECTORNAME"] = result_df["SECTORNAME"].str.lower()
     result_df["PERIOD"] = pd.to_datetime(result_df["PERIOD"])
 
@@ -169,22 +189,27 @@ kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 total_sales = fdf["SALES"].sum()
 total_revenue = fdf["REVENUE"].sum()
 avg_price = fdf["PRICE"].mean()
-total_customers = fdf["CUSTOMERS"].sum()
+total_customers = fdf.groupby("PERIOD")["CUSTOMERS"].sum().mean()
 
-monthly_total = fdf.groupby("PERIOD")["SALES"].sum().sort_index()
-if len(monthly_total) >= 2:
+# Only use complete months (exclude the most recent incomplete month)
+complete_months = fdf.groupby("PERIOD")["SALES"].sum().sort_index()
+
+# Drop the last month as it may be incomplete
+complete_months = complete_months.iloc[:-1]
+
+if len(complete_months) >= 2:
     mom_delta = (
-        (monthly_total.iloc[-1] - monthly_total.iloc[-2])
-        / monthly_total.iloc[-2] * 100
+        (complete_months.iloc[-1] - complete_months.iloc[-2])
+        / complete_months.iloc[-2] * 100
     )
     delta_str = f"{mom_delta:+.1f}% MoM"
 else:
     delta_str = None
 
-kpi1.metric("Total Sales", f"{total_sales:,.0f} MWh", delta=delta_str)
+kpi1.metric("Total Sales", f"{total_sales:,.0f} M kWh", delta=delta_str)
 kpi2.metric("Total Revenue", f"${total_revenue:,.0f} M")
 kpi3.metric("Avg Retail Price", f"{avg_price:.2f} ¢/kWh")
-kpi4.metric("Total Customers", f"{total_customers:,.0f}")
+kpi4.metric("Avg Monthly Customers", f"{total_customers:,.0f}")
 
 st.divider()
 
@@ -324,34 +349,29 @@ col_yoy, col_area = st.columns(2)
 
 with col_yoy:
     if metric != "PRICE":
-        yoy = fdf.groupby(["YEAR", "SECTORNAME"])[metric].sum().reset_index()
+        current_year = pd.Timestamp.today().year
+        yoy_fdf = fdf[fdf["YEAR"] < current_year]
+        yoy = yoy_fdf.groupby(["YEAR", "SECTORNAME"])[metric].sum().reset_index()
         yoy_pivot = yoy.pivot(index="YEAR", columns="SECTORNAME", values=metric)
         yoy_pct = (
             yoy_pivot.pct_change() * 100
         ).dropna().reset_index().melt(
-            id_vars="YEAR",
-            var_name="SECTORNAME",
-            value_name="YoY_pct",
+            id_vars="YEAR", var_name="SECTORNAME", value_name="YoY_pct"
         )
-
-        fig_yoy = px.bar(
-            yoy_pct,
-            x="YEAR",
-            y="YoY_pct",
-            color="SECTORNAME",
-            barmode="group",
-            title="Year-over-Year Growth (%) by Sector",
-            labels={
-                "YEAR": "Year",
-                "YoY_pct": "YoY Change (%)",
-                "SECTORNAME": "Sector",
-            },
-            template="plotly_white",
-            color_discrete_sequence=px.colors.qualitative.Set2,
-        )
-        fig_yoy.add_hline(y=0, line_dash="dash", line_color="grey", line_width=1)
-        fig_yoy.update_layout(height=360)
-        st.plotly_chart(fig_yoy, use_container_width=True)
+        if yoy_pct.empty:
+            st.info("YoY growth requires at least 2 complete years of data.")
+        else:
+            fig_yoy = px.bar(
+                yoy_pct, x="YEAR", y="YoY_pct", color="SECTORNAME",
+                barmode="group",
+                title="Year-over-Year Growth (%) by Sector",
+                labels={"YEAR": "Year", "YoY_pct": "YoY Change (%)", "SECTORNAME": "Sector"},
+                template="plotly_white",
+                color_discrete_sequence=px.colors.qualitative.Set2,
+            )
+            fig_yoy.add_hline(y=0, line_dash="dash", line_color="grey", line_width=1)
+            fig_yoy.update_layout(height=360)
+            st.plotly_chart(fig_yoy, use_container_width=True)
     else:
         st.info("YoY growth chart is shown for volume/revenue metrics. Switch the primary metric.")
 

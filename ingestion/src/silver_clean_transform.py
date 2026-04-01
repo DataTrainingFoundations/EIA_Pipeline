@@ -52,12 +52,16 @@ SF_SCHEMA   = os.environ.get("SNOWFLAKE_SCHEMA", "RAW")
 DATASET_TABLE_MAP = {
     "electricity_generation": "ELECTRICITY_GENERATION_RAW",
     "electricity_demand":     "ELECTRICITY_DEMAND_RAW",
+    "electricity_power_operational_data": "ELECTRICITY_POWER_OPERATIONAL_RAW",
+    "electricity_retail_sales": "ELECTRICITY_RETAIL_SALES_RAW",
 }
 
 # Deduplication key columns per dataset
 DEDUP_COLS = {
     "electricity_generation": ["PERIOD", "RESPONDENT", "FUELTYPE"],
     "electricity_demand":     ["PERIOD", "RESPONDENT", "TYPE"],
+    "electricity_power_operational_data": ["PERIOD", "STATE_ID", "SECTOR_ID", "FUEL_TYPE_ID"],
+    "electricity_retail_sales": ["PERIOD", "STATE_ID", "SECTOR_ABBR"],
 }
 
 
@@ -170,7 +174,101 @@ def _clean_demand(df: DataFrame) -> DataFrame:
     )
 
 ###TODO: Add clean _power_operations, and _clean retail_sales
-
+def _clean_retail_sales(df: DataFrame) -> DataFrame:
+    """
+    Clean and normalise electricity retail sales records.
+ 
+    Source columns (after Snowflake uppercasing):
+        PERIOD, STATE, STATENAME, SECTOR, SECTORNAME,
+        CUSTOMERS, PRICE, REVENUE, SALES
+ 
+    Notes:
+    - PERIOD is monthly ("YYYY-MM") — converted to first-of-month timestamp.
+    - No unit conversion: customers is a count, price is $/kWh, revenue is $,
+      sales is MWh.  All are kept as-is in their native units.
+    - Null rows are dropped only for the core identifier columns; individual
+      metric columns may be null for some state/sector combinations.
+    """
+    return (
+        df.filter(col("PERIOD").isNotNull())
+        .filter(col("STATEID").isNotNull())
+        .filter(col("SECTORID").isNotNull())
+        .withColumn("STATEID",  upper(trim(col("STATEID"))))
+        .withColumn("SECTORID", upper(trim(col("SECTORID"))))
+        # Monthly period → first-of-month timestamp for consistent typing
+        .withColumn(
+            "period_ts",
+            to_timestamp(concat(col("PERIOD"), lit("-01")), "yyyy-MM-dd"),
+        )
+        # Rename descriptive columns to consistent snake_case
+        .withColumnRenamed("STATEDESCRIPTION",  "state_description")
+        .withColumnRenamed("SECTORNAME", "sector_name")
+        # Lowercase the metric columns to match silver schema convention
+        .withColumnRenamed("CUSTOMERS", "customers")
+        .withColumnRenamed("PRICE",     "price")
+        .withColumnRenamed("REVENUE",   "revenue")
+        .withColumnRenamed("SALES",     "sales")
+        # Standardise identifier columns to lowercase
+        .withColumnRenamed("STATEID",  "state_id")
+        .withColumnRenamed("SECTORID", "sector_abbr")
+        .withColumnRenamed("PERIOD", "period")
+    )
+ 
+ 
+def _clean_power_operational(df: DataFrame) -> DataFrame:
+    """
+    Clean and normalise electric power operational data records.
+ 
+    Source columns (after Snowflake uppercasing):
+        PERIOD, LOCATION, LOCATION_NAME, STATEDESCRIPTION,
+        SECTORID, SECTORDESCRIPTION, FUELTYPEID, FUELTYPEDESCRIPTION,
+        ASH_CONTENT, CONSUMPTION_FOR_EG, GENERATION, HEAT_CONTENT
+ 
+    Notes:
+    - PERIOD is monthly ("YYYY-MM") — converted to first-of-month timestamp.
+    - No unit conversion: values are kept in their native EIA units
+      (generation = MWh, consumption = MMBtu, ash-content = %, heat = MMBtu/unit).
+    - Rows where ALL four metric columns are null are dropped as fully empty;
+      rows with partial nulls are kept because not every fuel type reports
+      every metric.
+    - SECTORID is cast to integer to match the registry schema.
+    """
+ 
+    return (
+        df.filter(col("PERIOD").isNotNull())
+        .filter(col("LOCATION").isNotNull())
+        .filter(col("FUELTYPEID").isNotNull())
+        # Drop rows with no metric values at all
+        .filter(
+            col("GENERATION").isNotNull()
+            | col("CONSUMPTION_FOR_EG").isNotNull()
+            | col("ASH_CONTENT").isNotNull()
+            | col("HEAT_CONTENT").isNotNull()
+        )
+        .withColumn("LOCATION",   upper(trim(col("LOCATION"))))
+        .withColumn("FUELTYPEID", upper(trim(col("FUELTYPEID"))))
+        # Monthly period → first-of-month timestamp
+        .withColumn(
+            "period_ts",
+            to_timestamp(concat(col("PERIOD"), lit("-01")), "yyyy-MM-dd"),
+        )
+        # Cast sectorid to integer (arrives as string from Snowflake JSON)
+        .withColumn("sector_id", col("SECTORID").cast("integer"))
+        # Rename descriptive columns to snake_case
+        .withColumnRenamed("STATEDESCRIPTION",     "state_description")
+        .withColumnRenamed("SECTORDESCRIPTION",    "sector_description")
+        .withColumnRenamed("FUELTYPEDESCRIPTION",  "fuel_type_description")
+        # Rename hyphen-derived metric columns (hyphens → underscores in Snowflake)
+        .withColumnRenamed("ASH_CONTENT",         "ash_content")
+        .withColumnRenamed("CONSUMPTION_FOR_EG",  "consumption_for_eg")
+        .withColumnRenamed("GENERATION",          "generation")
+        .withColumnRenamed("HEAT_CONTENT",        "heat_content")
+        # Standardise identifier columns to lowercase
+        .withColumnRenamed("LOCATION",   "state_id")
+        .withColumnRenamed("FUELTYPEID", "fuel_type_id")
+        .withColumnRenamed("PERIOD",     "period")
+        .drop("SECTORID")   # replaced by the cast lowercase version above
+    )
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
@@ -194,8 +292,14 @@ def run(dataset: str, date: str) -> None:
     # ── Clean ─────────────────────────────────────────────────────────────────
     if dataset == "electricity_generation":
         clean_df = _clean_generation(raw_df)
-    else:
+    elif dataset == "electricity_demand":
         clean_df = _clean_demand(raw_df)
+    elif dataset == "electricity_retail_sales":
+        clean_df = _clean_retail_sales(raw_df)
+    elif dataset == "electricity_power_operational_data":
+        clean_df = _clean_power_operational(raw_df)
+    else:
+        raise ValueError(f"No cleaner implemented for dataset '{dataset}'")
 
     # ── Deduplicate (Snowflake may have overlapping ingest windows) ───────────
     # Dedup cols were uppercased in Snowflake; after rename they're lowercase
@@ -217,7 +321,7 @@ def run(dataset: str, date: str) -> None:
     # )
 
     (
-        silver_df.write.mode("overwrite").save_as_table(f"{SF_DB}.SILVER.{silver_table}")
+        silver_df.write.mode("append").save_as_table(f"{SF_DB}.SILVER.{silver_table}")
     )
 
     logger.info("Silver write complete -> %s", silver_table)
@@ -230,7 +334,8 @@ if __name__ == "__main__":
         "--dataset",
         required=True,
         choices=list(DATASET_TABLE_MAP),
-        help="Dataset name (electricity_generation | electricity_demand)",
+        help=("Dataset name: electricity_generation | electricity_demand | "
+              "electricity_retail_sales | electricity_power_operational_data")
     )
     parser.add_argument("--date", required=True, help="Processing date (YYYY-MM-DD)")
     args = parser.parse_args()

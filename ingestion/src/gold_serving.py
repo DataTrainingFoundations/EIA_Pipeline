@@ -146,7 +146,8 @@ def _build_fact_generation_hourly(gen_df: DataFrame, date: str) -> None:
         col("GENERATION_GWH"),
         lit(date).alias("partition_date"),
     )
-    _write(fact, "fact_generation_hourly")
+    return fact
+    #_write(fact, "fact_generation_hourly")
 
 
 def _build_fact_demand_hourly(dem_df: DataFrame, date: str) -> None:
@@ -183,7 +184,35 @@ def _build_fact_demand_hourly(dem_df: DataFrame, date: str) -> None:
             lit(date).alias("partition_date"),
         )
     )
-    _write(fact, "fact_demand_hourly")
+    return fact
+    #_write(fact, "fact_demand_hourly")
+
+def _build_fact_hourly(gen_df: DataFrame, dem_df: DataFrame, date: str) -> None:
+    """
+    fact_hourly — one row per (period_ts, ba_code, fuel_code) with both generation and demand columns.
+    record_id = MD5(period_ts | ba_code | fuel_code) for upsert safety.
+    """
+    # First build the generation and demand facts separately to do the necessary
+    # aggregations and pivots, then join them together on (period_ts, ba_code).
+    gen_fact = _build_fact_generation_hourly(gen_df, date)
+    dem_fact = _build_fact_demand_hourly(dem_df, date)
+
+    fact = (
+        gen_fact.join(dem_fact, on=["PERIOD_TS", "BA_CODE"], how="left")
+        .select(
+            gen_fact["RECORD_ID"],
+            col("PERIOD_TS"),
+            col("BA_CODE"),
+            gen_fact["BA_NAME"],
+            col("FUEL_CODE"),
+            col("FUEL_NAME"),
+            col("GENERATION_GWH"),
+            col("DEMAND_GWH"),
+            col("FORECAST_GWH"),
+            lit(date).alias("partition_date"),
+        )
+    )
+    _write(fact, "fact_hourly")
 
 
 def _build_agg_daily_generation(gen_df: DataFrame, date: str) -> None:
@@ -239,18 +268,19 @@ def run(date: str) -> None:
     gen_df = session.table("SILVER_ELECTRICITY_GENERATION")
     dem_df = session.table("SILVER_ELECTRICITY_DEMAND")
 
-    gen_df = gen_df.filter(to_date(col("period_ts")) == date)
-    dem_df = dem_df.filter(to_date(col("period_ts")) == date)
+    # gen_df = gen_df.filter(to_date(col("period_ts")) == date)
+    # dem_df = dem_df.filter(to_date(col("period_ts")) == date)
 
     # Cache — each DataFrame is read by multiple builders
 
     # ── Build all serving tables ──────────────────────────────────────────────
     _build_dim_balancing_authority(gen_df, dem_df, date)
     _build_dim_fuel_type(gen_df, date)
-    _build_fact_generation_hourly(gen_df, date)
-    _build_fact_demand_hourly(dem_df, date)
-    _build_agg_daily_generation(gen_df, date)
-    _build_agg_daily_demand_peak(dem_df, date)
+    #_build_fact_generation_hourly(gen_df, date)
+    #_build_fact_demand_hourly(dem_df, date)
+    _build_fact_hourly(gen_df, dem_df, date)
+    #_build_agg_daily_generation(gen_df, date)
+    #_build_agg_daily_demand_peak(dem_df, date)
 
     logger.info("All gold serving tables complete for %s", date)
     session.close()

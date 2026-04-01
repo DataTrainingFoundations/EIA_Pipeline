@@ -2,3 +2,4 @@ streamlit
 psycopg2-binary
 pandas
 plotly
+snowflake-snowpark-python

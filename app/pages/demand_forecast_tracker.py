@@ -28,22 +28,12 @@ from ui_utils import (
     safe_quantile,
 )
 
-NUMERIC_COLS = [
-    "demand_gwh",
-    "forecast_gwh",
-    "forecast_error_gwh",
-    "forecast_error_pct",
-    "peak_gwh",
-]
-
+NUMERIC_COLS   = ["demand_gwh", "forecast_gwh", "forecast_error_gwh", "forecast_error_pct", "peak_gwh"]
 PRIORITY_ORDER = ["Critical", "Elevated", "Stable"]
 
 
 def _derive_priority(row: pd.Series, thresholds: dict) -> str:
-    """Classify one BA's forecast miss into a priority tier."""
     err_pct = pd.to_numeric(row.get("forecast_error_pct"), errors="coerce")
-    err_abs = abs(pd.to_numeric(row.get("forecast_error_gwh"), errors="coerce"))
-
     if thresholds["err_p90"] and abs(err_pct) >= thresholds["err_p90"]:
         return "Critical"
     if thresholds["err_p75"] and abs(err_pct) >= thresholds["err_p75"]:
@@ -64,16 +54,17 @@ with st.expander("How to read this page"):
 - **Daily peak demand** — rolling peak demand trend across BAs.
 """)
 
-if not table_has_rows("fact_demand_hourly"):
-    st.warning("No demand rows found yet. Let the pipeline run first.")
+# fact_hourly is the combined table — check demand rows exist
+if not table_has_rows("FACT_HOURLY"):
+    st.warning("No data found yet. Let the pipeline run first.")
     st.stop()
 
 # ── Filters ───────────────────────────────────────────────────────────────────
-coverage = get_demand_coverage()
+coverage   = get_demand_coverage()
 max_period = pd.to_datetime(coverage["max_period"], utc=True)
 min_period = pd.to_datetime(coverage["min_period"], utc=True)
 default_start, default_end = build_default_date_range(min_period, max_period, lookback_days=7)
-all_bas = list_ba_codes("fact_demand_hourly")
+all_bas    = list_ba_codes("FACT_HOURLY")
 
 col_a, col_b, col_c = st.columns([2, 2, 1])
 selected_range = col_a.date_input(
@@ -83,26 +74,26 @@ selected_range = col_a.date_input(
     max_value=max_period.date(),
 )
 selected_bas = col_b.multiselect("Balancing authorities", all_bas, default=all_bas)
-display_tz = col_c.selectbox("Timezone", get_timezone_options(), index=0)
+display_tz   = col_c.selectbox("Timezone", get_timezone_options(), index=0)
 
 if len(selected_range) != 2:
     st.stop()
 
 start_date, end_date = selected_range
-start_ts = f"{start_date}T00:00:00+00:00"
-end_ts = f"{end_date}T23:59:59+00:00"
+start_ts  = f"{start_date}T00:00:00+00:00"
+end_ts    = f"{end_date}T23:59:59+00:00"
 ba_filter = selected_bas or None
 
 # ── Load data ─────────────────────────────────────────────────────────────────
 hourly_df = load_demand_hourly(start_ts, end_ts, ba_filter)
 latest_df = load_latest_demand_snapshot(start_ts, end_ts, ba_filter)
-peak_df = load_daily_demand_peak(str(start_date), str(end_date), ba_filter)
+peak_df   = load_daily_demand_peak(str(start_date), str(end_date), ba_filter)
 
 if hourly_df.empty:
     st.warning("No demand rows found for the selected filters.")
     st.stop()
 
-hourly_df["period_ts"] = pd.to_datetime(hourly_df["period_ts"], utc=True)
+hourly_df["period_ts"]      = pd.to_datetime(hourly_df["period_ts"], utc=True)
 hourly_df["period_display"] = convert_timestamp_series(hourly_df["period_ts"], display_tz)
 hourly_df = coerce_numeric(hourly_df, NUMERIC_COLS)
 
@@ -112,13 +103,13 @@ peak_df = coerce_numeric(peak_df, ["peak_gwh"])
 
 # ── Watchlist derivation ──────────────────────────────────────────────────────
 watchlist_df = latest_df.copy()
-thresholds = {
+thresholds   = {
     "err_p90": safe_quantile(watchlist_df["forecast_error_pct"].abs(), 0.9),
     "err_p75": safe_quantile(watchlist_df["forecast_error_pct"].abs(), 0.75),
 }
 watchlist_df["priority"] = watchlist_df.apply(_derive_priority, axis=1, thresholds=thresholds)
 
-priority_order = pd.CategoricalDtype(categories=PRIORITY_ORDER, ordered=True)
+priority_order           = pd.CategoricalDtype(categories=PRIORITY_ORDER, ordered=True)
 watchlist_df["priority"] = watchlist_df["priority"].astype(priority_order)
 watchlist_df = watchlist_df.sort_values(
     ["priority", "forecast_error_pct"],
@@ -127,30 +118,27 @@ watchlist_df = watchlist_df.sort_values(
 )
 
 # ── KPI row ───────────────────────────────────────────────────────────────────
-latest_period = hourly_df["period_ts"].max()
-total_demand = latest_df["demand_gwh"].sum()
+latest_period  = hourly_df["period_ts"].max()
+total_demand   = latest_df["demand_gwh"].sum()
 total_forecast = latest_df["forecast_gwh"].sum()
-worst_miss = latest_df["forecast_error_pct"].abs().max()
+worst_miss     = latest_df["forecast_error_pct"].abs().max()
 critical_count = int((watchlist_df["priority"] == "Critical").sum())
 
 k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Latest period", format_timestamp(latest_period, display_tz))
-k2.metric("BAs in scope", f"{hourly_df['ba_code'].nunique():,}")
-k3.metric("Total demand (GWh)", f"{total_demand:,.1f}" if pd.notna(total_demand) else "n/a")
-k4.metric("Worst forecast miss", f"{worst_miss:.1f}%" if pd.notna(worst_miss) else "n/a")
-k5.metric("Critical BAs", f"{critical_count:,}")
+k1.metric("Latest period",       format_timestamp(latest_period, display_tz))
+k2.metric("BAs in scope",        f"{hourly_df['ba_code'].nunique():,}")
+k3.metric("Total demand (GWh)",  f"{total_demand:,.1f}" if pd.notna(total_demand) else "n/a")
+k4.metric("Worst forecast miss", f"{worst_miss:.1f}%"   if pd.notna(worst_miss)   else "n/a")
+k5.metric("Critical BAs",        f"{critical_count:,}")
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────
 st.subheader("Forecast miss watchlist")
 st.caption("BAs ranked by forecast error severity in the latest hourly snapshot.")
 st.dataframe(
     watchlist_df[[
-        "ba_code", "ba_name", "demand_gwh", "forecast_gwh",
+        "ba_code", "demand_gwh", "forecast_gwh",
         "forecast_error_gwh", "forecast_error_pct", "priority",
-    ]].rename(columns={
-        "forecast_error_gwh": "error_gwh",
-        "forecast_error_pct": "error_pct",
-    }),
+    ]].rename(columns={"forecast_error_gwh": "error_gwh", "forecast_error_pct": "error_pct"}),
     use_container_width=True,
     hide_index=True,
 )
@@ -159,7 +147,7 @@ st.dataframe(
 st.subheader("Where are the largest forecast misses right now?")
 rank_col1, rank_col2 = st.columns(2)
 
-over_df = (
+over_df  = (
     latest_df[latest_df["forecast_error_gwh"] > 0]
     .dropna(subset=["forecast_error_gwh"])
     .sort_values("forecast_error_gwh", ascending=False)
@@ -203,8 +191,8 @@ else:
 # ── Focus BA hourly trend ─────────────────────────────────────────────────────
 st.subheader("Focus balancing authority — demand vs forecast")
 focus_options = sorted(hourly_df["ba_code"].dropna().unique().tolist())
-focus_ba = st.selectbox("Focus BA", focus_options, index=0)
-focus_df = hourly_df[hourly_df["ba_code"] == focus_ba].copy().sort_values("period_ts")
+focus_ba      = st.selectbox("Focus BA", focus_options, index=0)
+focus_df      = hourly_df[hourly_df["ba_code"] == focus_ba].copy().sort_values("period_ts")
 
 if not focus_df.empty:
     demand_plot = (
@@ -213,10 +201,9 @@ if not focus_df.empty:
         .dropna(subset=["gwh"])
     )
     demand_plot["series"] = demand_plot["series"].replace({
-        "demand_gwh": "Actual demand",
+        "demand_gwh":   "Actual demand",
         "forecast_gwh": "Day-ahead forecast",
     })
-
     st.plotly_chart(
         px.line(
             demand_plot,
@@ -237,7 +224,10 @@ if not focus_df.empty:
                 color="forecast_error_gwh",
                 color_continuous_scale="RdBu",
                 color_continuous_midpoint=0,
-                labels={"period_display": f"Period ({display_tz})", "forecast_error_gwh": "Error (GWh)"},
+                labels={
+                    "period_display":     f"Period ({display_tz})",
+                    "forecast_error_gwh": "Error (GWh)",
+                },
                 title=f"{focus_ba} — hourly forecast error (actual minus forecast)",
             ),
             use_container_width=True,
@@ -254,10 +244,9 @@ if not peak_df.empty:
         .head(10)
         .index.tolist()
     )
-    peak_plot = peak_df[peak_df["ba_code"].isin(top_peak_bas)]
     st.plotly_chart(
         px.line(
-            peak_plot,
+            peak_df[peak_df["ba_code"].isin(top_peak_bas)],
             x="report_date", y="peak_gwh", color="ba_code",
             labels={"report_date": "Date", "peak_gwh": "Peak GWh", "ba_code": "BA"},
             title="Daily peak demand — top 10 BAs by average peak",
@@ -267,11 +256,11 @@ if not peak_df.empty:
 
 # ── Supporting analysis ───────────────────────────────────────────────────────
 with st.expander("Supporting analysis", expanded=False):
-    map_df = latest_df.copy()
-    map_df["lat"] = map_df["ba_code"].map(lambda c: RESPONDENT_GEO.get(c, {}).get("lat"))
-    map_df["lon"] = map_df["ba_code"].map(lambda c: RESPONDENT_GEO.get(c, {}).get("lon"))
+    map_df          = latest_df.copy()
+    map_df["lat"]   = map_df["ba_code"].map(lambda c: RESPONDENT_GEO.get(c, {}).get("lat"))
+    map_df["lon"]   = map_df["ba_code"].map(lambda c: RESPONDENT_GEO.get(c, {}).get("lon"))
     map_df["label"] = map_df["ba_code"].map(lambda c: RESPONDENT_GEO.get(c, {}).get("label", c))
-    map_df = map_df.dropna(subset=["lat", "lon", "demand_gwh"])
+    map_df          = map_df.dropna(subset=["lat", "lon", "demand_gwh"])
 
     if not map_df.empty:
         st.plotly_chart(
@@ -281,7 +270,10 @@ with st.expander("Supporting analysis", expanded=False):
                 color="forecast_error_pct",
                 size="demand_gwh",
                 hover_name="ba_code",
-                hover_data={"ba_name": True, "demand_gwh": ":.2f", "forecast_error_pct": ":.1f"},
+                hover_data={
+                    "demand_gwh": ":.2f",
+                    "forecast_error_pct": ":.1f",
+                },
                 color_continuous_scale="RdBu",
                 color_continuous_midpoint=0,
                 scope="usa",
@@ -295,7 +287,7 @@ with st.expander("Supporting analysis", expanded=False):
         st.download_button(
             label="Download focus BA demand data as CSV",
             data=focus_df[[
-                "period_display", "ba_code", "ba_name",
+                "period_display", "ba_code",
                 "demand_gwh", "forecast_gwh", "forecast_error_gwh",
             ]].to_csv(index=False).encode("utf-8"),
             file_name=f"{focus_ba.lower()}_demand_hourly.csv",

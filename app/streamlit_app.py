@@ -1,11 +1,11 @@
 """EIA Analytics — home page."""
 
 import streamlit as st
+from snowflake.snowpark import Session
 
 from data_access import (
-    get_connection,
-    get_generation_coverage,
-    get_demand_coverage,
+    get_session,
+    get_coverage,
     get_daily_generation_coverage,
     table_has_rows,
 )
@@ -17,18 +17,18 @@ st.caption(
     "powered by the EIA Open Data API."
 )
 
-# ── Connection check ──────────────────────────────────────────────────────────
+# ── Connection check ───────────────────────────────────────────────────────────
 try:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("select now()")
-            server_time = cur.fetchone()[0]
-    st.success(f"PostgreSQL connected — server time: {server_time}")
+    session = get_session()
+    result  = session.sql("SELECT CURRENT_TIMESTAMP() AS ts").collect()
+    session.close()
+    server_time = result[0]["TS"]
+    st.success(f"Snowflake connected — server time: {server_time}")
 except Exception as exc:
-    st.error(f"Database connection failed: {exc}")
+    st.error(f"Snowflake connection failed: {exc}")
     st.stop()
 
-# ── Persona cards ─────────────────────────────────────────────────────────────
+# ── Dashboard cards ────────────────────────────────────────────────────────────
 st.subheader("Dashboards")
 col1, col2 = st.columns(2)
 
@@ -50,35 +50,29 @@ if hasattr(st, "page_link"):
     link1.page_link("pages/generation_mix_monitor.py",  label="→ Generation Mix Monitor")
     link2.page_link("pages/demand_forecast_tracker.py", label="→ Demand & Forecast Tracker")
 
-# ── Data coverage ─────────────────────────────────────────────────────────────
+# ── Data coverage ──────────────────────────────────────────────────────────────
 st.subheader("Data coverage")
 c1, c2, c3 = st.columns(3)
 
-if table_has_rows("fact_generation_hourly"):
-    cov = get_generation_coverage()
-    c1.metric("Generation rows",   f"{int(cov['row_count']):,}")
+if table_has_rows():
+    cov = get_coverage()
+    c1.metric("Total hourly rows",   f"{int(cov['row_count']):,}")
     c1.caption(f"{cov['ba_count']} BAs · {cov['fuel_count']} fuel types")
     c1.caption(f"Latest: {cov['max_period']}")
+    c1.caption(f"Since:  {cov['min_period']}")
 else:
-    c1.warning("No generation data yet")
+    c1.warning("No data yet — run eia_ingest to populate.")
 
-if table_has_rows("fact_demand_hourly"):
-    cov = get_demand_coverage()
-    c2.metric("Demand rows",       f"{int(cov['row_count']):,}")
-    c2.caption(f"{cov['ba_count']} BAs")
-    c2.caption(f"Latest: {cov['max_period']}")
-else:
-    c2.warning("No demand data yet")
-
-if table_has_rows("agg_daily_generation"):
+if table_has_rows("AGG_DAILY_GENERATION"):
     cov = get_daily_generation_coverage()
-    c3.metric("Daily agg rows",    f"{int(cov['row_count']):,}")
-    c3.caption(f"{cov['min_date']} → {cov['max_date']}")
+    c2.metric("Daily generation rows", f"{int(cov['row_count']):,}")
+    c2.caption(f"{cov['min_date']} → {cov['max_date']}")
 else:
-    c3.warning("No daily agg data yet")
+    c2.warning("No daily aggregation data yet.")
 
-st.info(
-    "Data refreshes every hour at :15 past. "
-    "To load historical data, trigger the **eia_backfill_pipeline** DAG "
-    "from the Airflow UI with a start_date and end_date."
+# Third card — pipeline info
+c3.info(
+    "Data refreshes every hour at :15 past.\n\n"
+    "To backfill historical data, trigger the **eia_ingest** DAG "
+    "from Airflow with `{\"start_date\": \"YYYY-MM-DD\", \"end_date\": \"YYYY-MM-DD\"}`."
 )

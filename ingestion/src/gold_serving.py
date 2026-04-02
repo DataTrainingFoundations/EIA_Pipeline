@@ -15,7 +15,7 @@ import argparse
 import logging
 import os
 
-from snowflake.snowpark import DataFrame, Session
+from snowflake.snowpark import DataFrame, Session, Window
 from snowflake.snowpark.functions import (
     col,
     concat,
@@ -26,6 +26,7 @@ from snowflake.snowpark.functions import (
     round as spark_round,
     sum as spark_sum,
     to_date,
+    row_number,
 )
 
 logger = logging.getLogger(__name__)
@@ -124,8 +125,13 @@ def _build_fact_generation_hourly(gen_df: DataFrame, date: str) -> None:
     """
     # Aggregate within the date partition first (silver may have duplicates
     # across overlapping ingest windows).
+    latest_window = Window.partitionBy("period", "respondent", "fueltype").orderBy(
+        col("_ingested_at").desc()
+    )
+    stable_gen_df = gen_df.withColumn("record_rank", row_number().over(latest_window)).filter(col("record_rank") == 1).drop("record_rank")
+
     agg = (
-        gen_df.groupBy("period_ts", "respondent", "respondent_name", "fueltype", "fuel_type_name")
+        stable_gen_df.groupBy("period_ts", "respondent", "respondent_name", "fueltype", "fuel_type_name")
         .agg(spark_round(spark_sum("value_gwh"), 4).alias("generation_gwh"))
     )
     fact = agg.select(
@@ -156,13 +162,22 @@ def _build_fact_demand_hourly(dem_df: DataFrame, date: str) -> None:
     Pivots demand (D) and forecast (DF) type rows into two columns.
     record_id = MD5(period_ts | ba_code).
     """
+    latest_window = Window.partitionBy("period_ts", "respondent", "type").orderBy(
+        col("_ingested_at").desc()
+    )
+    stable_region_df = (
+        dem_df.withColumn("record_rank", row_number().over(latest_window))
+        .filter(col("record_rank") == 1)
+        .drop("record_rank")
+    )
+
     demand = (
-        dem_df.filter(col("type") == "D")
+        stable_region_df.filter(col("type") == "D")
         .groupBy("PERIOD_TS", "RESPONDENT", "RESPONDENT_NAME")
         .agg(spark_round(spark_sum("VALUE_GWH"), 4).alias("demand_gwh"))
     )
     forecast = (
-        dem_df.filter(col("type") == "DF")
+        stable_region_df.filter(col("type") == "DF")
         .groupBy("PERIOD_TS", "RESPONDENT")
         .agg(spark_round(spark_sum("VALUE_GWH"), 4).alias("forecast_gwh"))
     )
@@ -279,8 +294,8 @@ def run(date: str) -> None:
     #_build_fact_generation_hourly(gen_df, date)
     #_build_fact_demand_hourly(dem_df, date)
     _build_fact_hourly(gen_df, dem_df, date)
-    #_build_agg_daily_generation(gen_df, date)
-    #_build_agg_daily_demand_peak(dem_df, date)
+    _build_agg_daily_generation(gen_df, date)
+    _build_agg_daily_demand_peak(dem_df, date)
 
     logger.info("All gold serving tables complete for %s", date)
     session.close()

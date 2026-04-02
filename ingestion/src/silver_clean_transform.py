@@ -25,7 +25,7 @@ import logging
 import os
 
 
-from snowflake.snowpark import DataFrame, Session
+from snowflake.snowpark import DataFrame, Session, Window
 from snowflake.snowpark.functions import (
     col,
     current_timestamp,
@@ -34,7 +34,8 @@ from snowflake.snowpark.functions import (
     upper,
     when,
     concat,
-    lit
+    lit,
+    row_number,
 )
 
 logger = logging.getLogger(__name__)
@@ -150,6 +151,8 @@ def _clean_generation(df: DataFrame) -> DataFrame:
 
 def _clean_demand(df: DataFrame) -> DataFrame:
     """Clean and normalise electricity demand records."""
+
+
     return (
         df.filter(col("VALUE").isNotNull())
         .filter(col("VALUE") >= 0)

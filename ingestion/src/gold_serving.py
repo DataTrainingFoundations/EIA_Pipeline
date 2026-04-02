@@ -227,7 +227,9 @@ def _build_fact_hourly(gen_df: DataFrame, dem_df: DataFrame, date: str) -> None:
             lit(date).alias("partition_date"),
         )
     )
-    _write(fact, "fact_hourly")
+
+    renamed_fact = fact.withColumnRenamed("l_0002_BA_NAME", "BA_NAME").withColumnRenamed("l_0002_RECORD_ID", "RECORD_ID")
+    _write(renamed_fact, "fact_hourly")
 
 
 def _build_agg_daily_generation(gen_df: DataFrame, date: str) -> None:

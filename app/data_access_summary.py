@@ -1,20 +1,17 @@
 """Coverage and summary queries for the EIA Streamlit app."""
 
 from __future__ import annotations
-from typing import Any
-from contextlib import closing
 
-import pandas as pd
-import psycopg2
+from contextlib import closing
+from typing import Any
+
 import streamlit as st
 
 from data_access_shared import (
     AGG_DAILY_GENERATION,
-    AGG_DAILY_DEMAND_PEAK,
-    FACT_GENERATION_HOURLY,
-    FACT_DEMAND_HOURLY,
-    DIM_BALANCING_AUTHORITY,
     DIM_FUEL_TYPE,
+    FACT_DEMAND_HOURLY,
+    FACT_GENERATION_HOURLY,
     _safe_read_sql,
     get_connection,
 )
@@ -24,11 +21,11 @@ from data_access_shared import (
 def table_has_rows(table_name: str = FACT_GENERATION_HOURLY) -> bool:
     query = f"select exists (select 1 from {table_name} limit 1)"
     try:
-        with closing(get_connection()) as conn:
+        with get_connection() as conn:
             with closing(conn.cursor()) as cur:
                 cur.execute(query)
                 return bool(cur.fetchone()[0])
-    except psycopg2.Error:
+    except Exception:
         return False
 
 
@@ -36,10 +33,10 @@ def table_has_rows(table_name: str = FACT_GENERATION_HOURLY) -> bool:
 def get_generation_coverage() -> dict[str, Any]:
     query = f"""
     select
-        min(period_ts)  as min_period,
-        max(period_ts)  as max_period,
-        count(*)        as row_count,
-        count(distinct ba_code)   as ba_count,
+        min(period_ts) as min_period,
+        max(period_ts) as max_period,
+        count(*) as row_count,
+        count(distinct ba_code) as ba_count,
         count(distinct fuel_code) as fuel_count
     from {FACT_GENERATION_HOURLY}
     """
@@ -52,7 +49,7 @@ def get_demand_coverage() -> dict[str, Any]:
     select
         min(period_ts) as min_period,
         max(period_ts) as max_period,
-        count(*)       as row_count,
+        count(*) as row_count,
         count(distinct ba_code) as ba_count
     from {FACT_DEMAND_HOURLY}
     """
@@ -65,7 +62,7 @@ def get_daily_generation_coverage() -> dict[str, Any]:
     select
         min(report_date) as min_date,
         max(report_date) as max_date,
-        count(*)         as row_count
+        count(*) as row_count
     from {AGG_DAILY_GENERATION}
     """
     return _safe_read_sql(query).iloc[0].to_dict()

@@ -1,0 +1,192 @@
+from __future__ import annotations
+
+from snowflake.snowpark.functions import (
+    col,
+    concat,
+    current_timestamp,
+    lit,
+    max as sf_max,
+    md5,
+    round as sf_round,
+    sum as sf_sum,
+    to_date,
+)
+
+from pipeline.core.registry import get_gold_table_names
+
+GEN_STABLE_COLS = [
+    "period_ts",
+    "respondent",
+    "respondent_name",
+    "fueltype",
+    "fuel_type_name",
+    "value_gwh",
+]
+DEM_STABLE_COLS = [
+    "period_ts",
+    "respondent",
+    "respondent_name",
+    "type",
+    "demand_type_name",
+    "value_gwh",
+]
+
+
+def _silver_table(database: str, table_name: str) -> str:
+    return f"{database}.SILVER.{table_name}"
+
+
+def _gold_table(database: str, table_name: str) -> str:
+    return f"{database}.GOLD.{table_name}"
+
+
+def _record_hash(*parts):
+    expr = None
+    for index, part in enumerate(parts):
+        piece = part.cast("string")
+        expr = piece if index == 0 else concat(expr, lit("|"), piece)
+    return md5(expr)
+
+
+def _delete_partition_if_present(session, full_table_name: str, target_date: str) -> None:
+    try:
+        session.sql(f"delete from {full_table_name} where partition_date = '{target_date}'").collect()
+    except Exception:
+        return
+
+
+def _write_partitioned_table(session, df, full_table_name: str, target_date: str) -> int:
+    output = df.with_column("gold_processed_at", current_timestamp())
+    count = output.count()
+    _delete_partition_if_present(session, full_table_name, target_date)
+    output.write.mode("append").save_as_table(full_table_name)
+    return count
+
+
+def _write_dimension_table(df, full_table_name: str) -> int:
+    output = df.with_column("gold_processed_at", current_timestamp())
+    count = output.count()
+    output.write.mode("overwrite").save_as_table(full_table_name)
+    return count
+
+
+def _stabilize_generation(df):
+    return (
+        df.select(*GEN_STABLE_COLS)
+        .dropna(subset=["period_ts", "respondent", "fueltype"])
+        .drop_duplicates(GEN_STABLE_COLS)
+    )
+
+
+def _stabilize_demand(df):
+    return (
+        df.select(*DEM_STABLE_COLS)
+        .dropna(subset=["period_ts", "respondent", "type"])
+        .drop_duplicates(DEM_STABLE_COLS)
+    )
+
+
+def run_gold(session, target_date: str, database: str) -> dict[str, int]:
+    gen_df = session.table(_silver_table(database, "SILVER_ELECTRICITY_GENERATION")).filter(
+        col("partition_date") == lit(target_date)
+    )
+    dem_df = session.table(_silver_table(database, "SILVER_ELECTRICITY_DEMAND")).filter(
+        col("partition_date") == lit(target_date)
+    )
+    gen_df = _stabilize_generation(gen_df)
+    dem_df = _stabilize_demand(dem_df)
+
+    gold_tables = get_gold_table_names()
+    fact_generation_name = _gold_table(database, gold_tables["fact_generation_hourly"])
+    fact_demand_name = _gold_table(database, gold_tables["fact_demand_hourly"])
+    agg_generation_name = _gold_table(database, gold_tables["agg_daily_generation"])
+    agg_demand_peak_name = _gold_table(database, gold_tables["agg_daily_demand_peak"])
+    dim_ba_name = _gold_table(database, gold_tables["dim_balancing_authority"])
+    dim_fuel_name = _gold_table(database, gold_tables["dim_fuel_type"])
+    results: dict[str, int] = {}
+
+    fact_generation = (
+        gen_df.group_by("period_ts", "respondent", "respondent_name", "fueltype", "fuel_type_name")
+        .agg(sf_round(sf_sum("value_gwh"), 4).alias("generation_gwh"))
+        .select(
+            _record_hash(col("period_ts"), col("respondent"), col("fueltype")).alias("record_id"),
+            col("period_ts"),
+            col("respondent").alias("ba_code"),
+            col("respondent_name").alias("ba_name"),
+            col("fueltype").alias("fuel_code"),
+            col("fuel_type_name").alias("fuel_name"),
+            col("generation_gwh"),
+            lit(target_date).alias("partition_date"),
+        )
+    )
+    results["fact_generation_hourly"] = _write_partitioned_table(
+        session, fact_generation, fact_generation_name, target_date
+    )
+
+    demand_actual = (
+        dem_df.filter(col("type") == "D")
+        .group_by("period_ts", "respondent", "respondent_name")
+        .agg(sf_round(sf_sum("value_gwh"), 4).alias("demand_gwh"))
+    )
+    demand_forecast = (
+        dem_df.filter(col("type") == "DF")
+        .group_by("period_ts", "respondent")
+        .agg(sf_round(sf_sum("value_gwh"), 4).alias("forecast_gwh"))
+    )
+    fact_demand = demand_actual.join(demand_forecast, on=["period_ts", "respondent"], how="left").select(
+        _record_hash(col("period_ts"), col("respondent")).alias("record_id"),
+        col("period_ts"),
+        col("respondent").alias("ba_code"),
+        col("respondent_name").alias("ba_name"),
+        col("demand_gwh"),
+        col("forecast_gwh"),
+        lit(target_date).alias("partition_date"),
+    )
+    results["fact_demand_hourly"] = _write_partitioned_table(
+        session, fact_demand, fact_demand_name, target_date
+    )
+
+    agg_generation = (
+        gen_df.with_column("report_date", to_date("period_ts"))
+        .group_by("report_date", "fueltype", "fuel_type_name")
+        .agg(sf_round(sf_sum("value_gwh"), 4).alias("total_gwh"))
+        .select(
+            col("report_date"),
+            col("fueltype").alias("fuel_code"),
+            col("fuel_type_name").alias("fuel_name"),
+            col("total_gwh"),
+            lit(target_date).alias("partition_date"),
+        )
+    )
+    results["agg_daily_generation"] = _write_partitioned_table(
+        session, agg_generation, agg_generation_name, target_date
+    )
+
+    agg_demand_peak = (
+        dem_df.filter(col("type") == "D")
+        .with_column("report_date", to_date("period_ts"))
+        .group_by("report_date", "respondent", "respondent_name")
+        .agg(sf_round(sf_max("value_gwh"), 4).alias("peak_gwh"))
+        .select(
+            col("report_date"),
+            col("respondent").alias("ba_code"),
+            col("respondent_name").alias("ba_name"),
+            col("peak_gwh"),
+            lit(target_date).alias("partition_date"),
+        )
+    )
+    results["agg_daily_demand_peak"] = _write_partitioned_table(
+        session, agg_demand_peak, agg_demand_peak_name, target_date
+    )
+
+    dim_ba = (
+        session.table(fact_generation_name)
+        .select(col("ba_code"), col("ba_name"))
+        .union(session.table(fact_demand_name).select(col("ba_code"), col("ba_name")))
+        .drop_duplicates(["ba_code"])
+    )
+    results["dim_balancing_authority"] = _write_dimension_table(dim_ba, dim_ba_name)
+
+    dim_fuel = session.table(fact_generation_name).select(col("fuel_code"), col("fuel_name")).drop_duplicates(["fuel_code"])
+    results["dim_fuel_type"] = _write_dimension_table(dim_fuel, dim_fuel_name)
+    return results

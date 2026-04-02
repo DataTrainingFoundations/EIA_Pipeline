@@ -1,7 +1,7 @@
 datasets:
   - id: electricity_generation_hourly
     name: "Electricity Generation by Source (Hourly)"
-    snowflake_table: ELECTRICITY_GENERATION_RAW   # written to SNOWFLAKE_DATABASE.SNOWFLAKE_SCHEMA
+    snowflake_table: ELECTRICITY_GENERATION_RAW
     eia_route: "electricity/rto/fuel-type-data"
     frequency: "hourly"
     rolling_days: 7
@@ -11,19 +11,19 @@ datasets:
         - value
       facets:
         fueltype:
-          - NG   # Natural Gas
-          - COL  # Coal
-          - NUC  # Nuclear
-          - WND  # Wind
-          - SUN  # Solar
-          - WAT  # Hydro
+          - NG
+          - COL
+          - NUC
+          - WND
+          - SUN
+          - WAT
       sort:
         - column: period
           direction: desc
       length: 500
     schema:
-      period: string             # e.g. "2024-01-01T00"
-      respondent: string         # Balancing authority code
+      period: string
+      respondent: string
       respondent-name: string
       fueltype: string
       type-name: string
@@ -32,7 +32,7 @@ datasets:
 
   - id: electricity_demand_hourly
     name: "Electricity Demand by Region (Hourly)"
-    snowflake_table: ELECTRICITY_DEMAND_RAW        # written to SNOWFLAKE_DATABASE.SNOWFLAKE_SCHEMA
+    snowflake_table: ELECTRICITY_DEMAND_RAW
     eia_route: "electricity/rto/region-data"
     frequency: "hourly"
     rolling_days: 7
@@ -42,8 +42,8 @@ datasets:
         - value
       facets:
         type:
-          - D    # Demand
-          - DF   # Demand Forecast
+          - D
+          - DF
       sort:
         - column: period
           direction: desc

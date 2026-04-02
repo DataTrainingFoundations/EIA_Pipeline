@@ -10,6 +10,8 @@ docker compose up -d --build
 
 Open UIs.
 
+docker compose exec airflow airflow users reset-password --username admin --password admin
+
 Airflow http://localhost:28080  
 Airflow login: `admin` / `admin`  
 MinIO http://localhost:29001  

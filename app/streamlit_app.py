@@ -54,7 +54,7 @@ if hasattr(st, "page_link"):
     link1, link2, link3 = st.columns(3)
     link1.page_link("pages/generation_mix_monitor.py",  label="→ Generation Mix Monitor")
     link2.page_link("pages/demand_forecast_tracker.py", label="→ Demand & Forecast Tracker")
-    link3.page_link("pages/monthly_sales_trends.py", label="→ Monthly Sales Trends")
+    link3.page_link("pages/monthly_sales_trends_gold.py", label="→ Monthly Sales Trends")
 
 # ── Data coverage ─────────────────────────────────────────────────────────────
 st.subheader("Data coverage")

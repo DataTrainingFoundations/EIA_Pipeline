@@ -95,7 +95,7 @@ def load_operational_data(
                 "FUELTYPEID", "FUELTYPEDESCRIPTION",
                 "GENERATION", "GENERATION_UNITS",
                 "CONSUMPTION_FOR_EG", "CONSUMPTION_FOR_EG_UNITS",
-                "HEAT_CONTENT", "HEAT_CONTENT_UNITS",
+                "HEAT_CONTENT", "HEAT_CONTENT_UNITS", "ASH_CONTENT"
             )
         )
 

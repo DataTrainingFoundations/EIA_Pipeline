@@ -1,13 +1,18 @@
 """Monthly Sales Trends — EIA Analytics dashboard page."""
-import os
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from dotenv import load_dotenv
-from snowflake.snowpark import Session
-from snowflake.snowpark.functions import col, lower
+from data_access_sales import (
+    load_sales_data,
+    load_sales_coverage,
+    sales_table_has_rows,
+)
+from data_access_operational import (
+    load_fuel_mix_price_joined,
+    operational_table_has_rows,
+)
 
 st.set_page_config(page_title="Monthly Sales Trends · EIA Analytics", layout="wide")
 
@@ -18,82 +23,21 @@ st.caption(
     "Data sourced from EIA retail sales reporting."
 )
 
+# ── Early exit guard ──────────────────────────────────────────────────────────
+if not sales_table_has_rows():
+    st.warning("No sales data found. Check the pipeline.")
+    st.stop()
 
-# ── Data loading (stub — replace with real connection logic) ──────────────────
-load_dotenv()
-
-@st.cache_data(ttl=3600)
-def load_sales_data() -> pd.DataFrame:
-    """
-    # DEBUG
-    raw = session.table("ELECTRICITY_RETAIL_SALES_RAW")
-    print("Row count unfiltered:", raw.count())
-    print("Columns:", raw.columns)
-    print("Unique SECTORID:", raw.select("SECTORID").distinct().collect())
-    print("Unique STATEID sample:", raw.select("STATEID").distinct().collect()[:5])
-    print("Period range:", raw.select("PERIOD").distinct().collect())
-    state_ids = [row["STATEID"] for row in raw.select("STATEID").distinct().collect()]
-    print("All STATEIDs:", sorted(state_ids))
-    """
-    session = Session.builder.configs({
-        "account":   os.getenv("SNOWFLAKE_ACCOUNT"),
-        "user":      os.getenv("SNOWFLAKE_USER"),
-        "password":  os.getenv("SNOWFLAKE_PASSWORD"),
-        "database":  os.getenv("SNOWFLAKE_DATABASE"),
-        "schema":    os.getenv("SNOWFLAKE_SCHEMA"),
-        "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE"),
-        "role":      os.getenv("SNOWFLAKE_ROLE"),
-    }).create()
-
-    VALID_STATES = {
-    'AL','AK','AZ','AR','CA','CO','CT','DE','DC','FL','GA','HI','ID',
-    'IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO',
-    'MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA',
-    'RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'
-    }
-
-    result_df = (
-    session.table("ELECTRICITY_RETAIL_SALES_RAW")
-    .filter(col("SECTORID") != "ALL")
-    .filter(col("STATEID").isin(list(VALID_STATES)))
-    .select("PERIOD", "STATEID", "STATEDESCRIPTION", "SECTORNAME",
-            "CUSTOMERS", "PRICE", "REVENUE", "SALES")
-    .to_pandas()
-    )
-    print("Row count after filter:", len(result_df))
-    session.close()
-
-    numeric_cols = ["CUSTOMERS", "PRICE", "REVENUE", "SALES"]
-    result_df[numeric_cols] = result_df[numeric_cols].apply(pd.to_numeric, errors="coerce")
-    result_df["SECTORNAME"] = result_df["SECTORNAME"].str.lower()
-    result_df["PERIOD"] = pd.to_datetime(result_df["PERIOD"])
-
-    return result_df
-
-@st.cache_data(ttl=3600)
-def load_local_sales_data() -> pd.DataFrame:
-    """
-    FOR LOCAL TESTING: 
-    Load Local Sales Data:
-    Load data from local csv
-    Write to Df
-    Use dataframe to pull pre-defined columns for visualizations
-    """
-    result_df = pd.read_csv(
-        "/Users/ezra/Documents/Python/EIA_Pipeline/ELECTRICITY_SALES_MONTHLY_BRONZE.csv"
-    )
-    result_df = result_df[result_df["STATEID"] != "US"]
-    result_df = result_df[result_df["SECTORNAME"].str.lower() != "all sectors"]
-    numeric_cols = ["CUSTOMERS", "PRICE", "REVENUE", "SALES"]
-    result_df[numeric_cols] = result_df[numeric_cols].apply(pd.to_numeric, errors="coerce")
-    result_df.columns = result_df.columns.str.upper()
-    result_df["SECTORNAME"] = result_df["SECTORNAME"].str.lower()
-    result_df["PERIOD"] = pd.to_datetime(result_df["PERIOD"])
-
-    return result_df
-
+# ── Data loading ──────────────────────────────────────────────────────────────
 with st.spinner("Loading sales data…"):
     df = load_sales_data()
+
+with st.spinner("Loading generation mix data…"):
+    ops_available = operational_table_has_rows()
+    if ops_available:
+        joined_df = load_fuel_mix_price_joined()
+    else:
+        joined_df = pd.DataFrame()
 
 if df.empty:
     st.warning("No sales data available. Check the data pipeline.")
@@ -108,8 +52,9 @@ df["YEAR_MONTH"] = df["PERIOD"].dt.strftime("%Y-%m")
 with st.sidebar:
     st.header("Filters")
 
-    min_date = df["PERIOD"].min().to_pydatetime()
-    max_date = df["PERIOD"].max().to_pydatetime()
+    coverage = load_sales_coverage()
+    min_date = coverage["min_period"].to_pydatetime()
+    max_date = coverage["max_period"].to_pydatetime()
 
     date_range = st.date_input(
         "Date range",
@@ -191,17 +136,11 @@ total_revenue = fdf["REVENUE"].sum()
 avg_price = fdf["PRICE"].mean()
 total_customers = fdf.groupby("PERIOD")["CUSTOMERS"].sum().mean()
 
-# Only use complete months (exclude the most recent incomplete month)
 complete_months = fdf.groupby("PERIOD")["SALES"].sum().sort_index()
-
-# Drop the last month as it may be incomplete
 complete_months = complete_months.iloc[:-1]
 
 if len(complete_months) >= 2:
-    mom_delta = (
-        (complete_months.iloc[-1] - complete_months.iloc[-2])
-        / complete_months.iloc[-2] * 100
-    )
+    mom_delta = (complete_months.iloc[-1] - complete_months.iloc[-2]) / complete_months.iloc[-2] * 100
     delta_str = f"{mom_delta:+.1f}% MoM"
 else:
     delta_str = None
@@ -213,209 +152,346 @@ kpi4.metric("Avg Monthly Customers", f"{total_customers:,.0f}")
 
 st.divider()
 
-# ── Row 1: Monthly trend line + Sector pie ────────────────────────────────────
-st.subheader("Trends & Mix")
-col_line, col_pie = st.columns([3, 1])
+#                   ── Vertical Layout: stack charts one below another ───────────────────────────
 
-with col_line:
-    if metric != "PRICE":
-        monthly_sector = fdf.groupby(["PERIOD", "SECTORNAME"])[metric].sum().reset_index()
-    else:
-        monthly_sector = fdf.groupby(["PERIOD", "SECTORNAME"])[metric].mean().reset_index()
+#--------
+# Monthly Trends by Sector
+#--------
+st.subheader("Monthly Trends by Sector")
+if metric != "PRICE":
+    monthly_sector = fdf.groupby(["PERIOD", "SECTORNAME"])[metric].sum().reset_index()
+else:
+    monthly_sector = fdf.groupby(["PERIOD", "SECTORNAME"])[metric].mean().reset_index()
 
-    fig_line = px.line(
-        monthly_sector,
-        x="PERIOD",
-        y=metric,
-        color="SECTORNAME",
-        markers=True,
-        title=f"Monthly {metric_label} by Sector",
-        labels={"PERIOD": "Month", metric: metric_label, "SECTORNAME": "Sector"},
-        template="plotly_white",
-    )
-    fig_line.update_traces(
+fig_line = px.line(
+    monthly_sector,
+    x="PERIOD",
+    y=metric,
+    color="SECTORNAME",
+    markers=True,
+    title=f"Monthly {metric_label} by Sector",
+    labels={"PERIOD": "Month", metric: metric_label, "SECTORNAME": "Sector"},
+    template="plotly_white",
+)
+
+# Apply per-trace fill using each line's own color at 15% opacity
+for trace in fig_line.data:
+    r, g, b = int(trace.line.color[1:3], 16), int(trace.line.color[3:5], 16), int(trace.line.color[5:7], 16)
+    trace.update(
+        fill="tozeroy",
+        fillcolor=f"rgba({r},{g},{b},0.15)",
         line_width=2,
         marker_size=5,
-        fill="tozeroy",
-        fillcolor="rgba(0,0,0,0.08)",
-    )
-    fig_line.update_layout(
-        legend_title_text="Sector",
-        height=380,
-        yaxis=dict(
-            tickprefix=tick_fmt["tickprefix"],
-            ticksuffix=tick_fmt["ticksuffix"],
-        ),
-    )
-    st.plotly_chart(fig_line, use_container_width=True)
-
-with col_pie:
-    agg_fn = "mean" if metric == "PRICE" else "sum"
-    sector_totals = fdf.groupby("SECTORNAME")[metric].agg(agg_fn).reset_index()
-
-    fig_pie = px.pie(
-        sector_totals,
-        names="SECTORNAME",
-        values=metric,
-        title=f"{metric_label} Share",
-        template="plotly_white",
-        hole=0.42,
-        color_discrete_sequence=px.colors.qualitative.Set2,
-    )
-    fig_pie.update_traces(
-        textposition="outside",
-        textinfo="percent+label",
-        hovertemplate=(
-            "<b>%{label}</b><br>"
-            + tick_fmt["tickprefix"]
-            + "%{value:,.1f}"
-            + tick_fmt["ticksuffix"]
-            + "<extra></extra>"
-        ),
-    )
-    fig_pie.update_layout(showlegend=False, height=380)
-    st.plotly_chart(fig_pie, use_container_width=True)
-
-# ── Row 2: State bar + Seasonal heatmap ──────────────────────────────────────
-st.subheader("State & Seasonal Breakdown")
-col_bar, col_heat = st.columns(2)
-
-with col_bar:
-    agg_fn = "mean" if metric == "PRICE" else "sum"
-    state_totals = (
-        fdf.groupby("STATEDESCRIPTION")[metric]
-        .agg(agg_fn)
-        .sort_values(ascending=False)
-        .reset_index()
     )
 
-    fig_bar = px.bar(
-        state_totals,
-        x="STATEDESCRIPTION",
-        y=metric,
-        title=f"Total {metric_label} by State",
-        labels={"STATEDESCRIPTION": "State", metric: metric_label},
-        template="plotly_white",
-        color=metric,
-        color_continuous_scale="Teal",
+fig_line.update_layout(
+    legend_title_text="Sector",
+    height=380,
+    yaxis=dict(tickprefix=tick_fmt["tickprefix"], ticksuffix=tick_fmt["ticksuffix"]),
+)
+st.plotly_chart(fig_line, use_container_width=True)
+#--------
+# Market Share Pie Chart
+#--------
+st.subheader(f"{metric_label} Share by Sector")
+agg_fn = "mean" if metric == "PRICE" else "sum"
+sector_totals = fdf.groupby("SECTORNAME")[metric].agg(agg_fn).reset_index()
+fig_pie = px.pie(
+    sector_totals,
+    names="SECTORNAME",
+    values=metric,
+    title=f"{metric_label} Share",
+    template="plotly_white",
+    hole=0.42,
+    color_discrete_sequence=px.colors.qualitative.Set2,
+)
+fig_pie.update_traces(textposition="outside", textinfo="percent+label",
+                      hovertemplate="<b>%{label}</b><br>" + tick_fmt["tickprefix"] + "%{value:,.1f}" + tick_fmt["ticksuffix"] + "<extra></extra>")
+fig_pie.update_layout(showlegend=False, height=380)
+st.plotly_chart(fig_pie, use_container_width=True)
+#--------
+# Totals By State Bar Chart
+#--------
+st.subheader("Total by State")
+state_totals = fdf.groupby("STATEDESCRIPTION")[metric].agg(agg_fn).reset_index().sort_values(by="STATEDESCRIPTION")
+fig_bar = px.bar(
+    state_totals,
+    x="STATEDESCRIPTION",
+    y=metric,
+    title=f"Total {metric_label} by State",
+    labels={"STATEDESCRIPTION": "State", metric: metric_label},
+    template="plotly_white",
+    color=metric,
+    color_continuous_scale="Teal",
+)
+fig_bar.update_layout(xaxis=dict(categoryorder="category ascending"), xaxis_tickangle=-40,
+                      coloraxis_showscale=False, height=380,
+                      yaxis=dict(tickprefix=tick_fmt["tickprefix"], ticksuffix=tick_fmt["ticksuffix"]))
+st.plotly_chart(fig_bar, use_container_width=True)
+##--------
+# Seasonal Heatmap
+#--------
+st.subheader("Seasonal Heatmap")
+heat_agg_fn = np.mean if metric == "PRICE" else np.sum
+
+# Only include years with all 12 months of data
+complete_years = (
+    fdf.groupby("YEAR")["MONTH"]
+    .nunique()
+    .pipe(lambda s: s[s == 12])
+    .index
+)
+heat_fdf = fdf[fdf["YEAR"].isin(complete_years)]
+
+heat_data = (
+    heat_fdf.groupby(["YEAR", "MONTH"])[metric]
+    .agg(heat_agg_fn)
+    .reset_index()
+    .pivot(index="MONTH", columns="YEAR", values=metric)
+)
+month_names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+heat_data.index = [month_names[m-1] for m in heat_data.index]
+
+fig_heat = px.imshow(
+    heat_data,
+    title=f"Seasonal Heatmap — {metric_label}",
+    labels={"x": "Year", "y": "Month", "color": metric_label},
+    template="plotly_white",
+    color_continuous_scale="YlOrRd",
+    aspect="auto",
+)
+fig_heat.update_layout(height=380)
+fig_heat.update_traces(
+    hovertemplate="Month: %{y}<br>Year: %{x}<br>" + tick_fmt["tickprefix"] + "%{z:,.1f}" + tick_fmt["ticksuffix"] + "<extra></extra>"
+)
+st.plotly_chart(fig_heat, use_container_width=True)
+#--------
+# Growth over Years
+#--------
+st.subheader("Year-over-Year Growth")
+if metric != "PRICE":
+    # Only include years with all 12 months — same logic as heatmap
+    complete_years = (
+        fdf.groupby("YEAR")["MONTH"]
+        .nunique()
+        .pipe(lambda s: s[s == 12])
+        .index
     )
-    fig_bar.update_layout(
-        xaxis_tickangle=-40,
-        coloraxis_showscale=False,
-        height=380,
-        yaxis=dict(
-            tickprefix=tick_fmt["tickprefix"],
-            ticksuffix=tick_fmt["ticksuffix"],
-        ),
-    )
-    st.plotly_chart(fig_bar, use_container_width=True)
-
-with col_heat:
-    heat_agg_fn = np.mean if metric == "PRICE" else np.sum
-    heat_data = (
-        fdf.groupby(["YEAR", "MONTH"])[metric]
-        .agg(heat_agg_fn)
-        .reset_index()
-        .pivot(index="MONTH", columns="YEAR", values=metric)
-    )
-
-    month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    heat_data.index = [month_names[m - 1] for m in heat_data.index]
-
-    fig_heat = px.imshow(
-        heat_data,
-        title=f"Seasonal Heatmap — {metric_label}",
-        labels={"x": "Year", "y": "Month", "color": metric_label},
-        template="plotly_white",
-        color_continuous_scale="YlOrRd",
-        aspect="auto",
-    )
-    fig_heat.update_layout(height=380)
-    fig_heat.update_traces(
-        hovertemplate=(
-            "Month: %{y}<br>Year: %{x}<br>"
-            + tick_fmt["tickprefix"]
-            + "%{z:,.1f}"
-            + tick_fmt["ticksuffix"]
-            + "<extra></extra>"
-        ),
-    )
-    st.plotly_chart(fig_heat, use_container_width=True)
-
-# ── Row 3: YoY growth bars + Cumulative area ─────────────────────────────────
-st.subheader("Year-over-Year & Cumulative")
-col_yoy, col_area = st.columns(2)
-
-with col_yoy:
-    if metric != "PRICE":
-        current_year = pd.Timestamp.today().year
-        yoy_fdf = fdf[fdf["YEAR"] < current_year]
-        yoy = yoy_fdf.groupby(["YEAR", "SECTORNAME"])[metric].sum().reset_index()
-        yoy_pivot = yoy.pivot(index="YEAR", columns="SECTORNAME", values=metric)
-        yoy_pct = (
-            yoy_pivot.pct_change() * 100
-        ).dropna().reset_index().melt(
-            id_vars="YEAR", var_name="SECTORNAME", value_name="YoY_pct"
-        )
-        if yoy_pct.empty:
-            st.info("YoY growth requires at least 2 complete years of data.")
-        else:
-            fig_yoy = px.bar(
-                yoy_pct, x="YEAR", y="YoY_pct", color="SECTORNAME",
-                barmode="group",
-                title="Year-over-Year Growth (%) by Sector",
-                labels={"YEAR": "Year", "YoY_pct": "YoY Change (%)", "SECTORNAME": "Sector"},
-                template="plotly_white",
-                color_discrete_sequence=px.colors.qualitative.Set2,
-            )
-            fig_yoy.add_hline(y=0, line_dash="dash", line_color="grey", line_width=1)
-            fig_yoy.update_layout(height=360)
-            st.plotly_chart(fig_yoy, use_container_width=True)
-    else:
-        st.info("YoY growth chart is shown for volume/revenue metrics. Switch the primary metric.")
-
-with col_area:
-    if metric != "PRICE":
-        cum_data = fdf.groupby("PERIOD")[metric].sum().reset_index()
-    else:
-        cum_data = fdf.groupby("PERIOD")[metric].mean().reset_index()
-
-    cum_data = cum_data.sort_values("PERIOD")
-    cum_data["CUMULATIVE"] = cum_data[metric].cumsum()
-
-    fig_area = go.Figure()
-    fig_area.add_trace(go.Scatter(
-        x=cum_data["PERIOD"],
-        y=cum_data["CUMULATIVE"],
-        fill="tozeroy",
-        mode="lines",
-        line_color="#0d9488",
-        fillcolor="rgba(13,148,136,0.15)",
-        name=f"Cumulative {metric_label}",
+    yoy_fdf = fdf[fdf["YEAR"].isin(complete_years)]
+    yoy = yoy_fdf.groupby(["YEAR", "SECTORNAME"])[metric].sum().reset_index()
+    yoy_pivot = yoy.pivot(index="YEAR", columns="SECTORNAME", values=metric)
+    yoy_pct = ( yoy_pivot.pct_change() * 100).dropna(how="all").reset_index()\
+        .melt(id_vars="YEAR", var_name="SECTORNAME", value_name="YoY_pct")\
+            .dropna(subset=["YoY_pct"])  # drop any remaining NaN values per sector
+    print("All years in fdf:", sorted(fdf["YEAR"].unique()))
+    print("Months per year:", fdf.groupby("YEAR")["MONTH"].nunique().to_dict())
+    print("Complete years:", list(
+        fdf.groupby("YEAR")["MONTH"].nunique().pipe(lambda s: s[s == 12]).index
     ))
-    fig_area.update_layout(
-        title=f"Cumulative {metric_label} Over Time",
-        xaxis_title="Month",
-        yaxis_title=f"Cumulative {metric_label}",
-        yaxis=dict(
-            tickprefix=tick_fmt["tickprefix"],
-            ticksuffix=tick_fmt["ticksuffix"],
-        ),
-        template="plotly_white",
-        height=360,
-    )
-    st.plotly_chart(fig_area, use_container_width=True)
+    print("yoy_pct sample:", yoy_pct.head(10) if not yoy_pct.empty else "EMPTY")
+    print("Annual totals in fdf:", fdf.groupby("YEAR")[metric].sum().to_dict())
+    print("Annual totals in yoy_fdf:", yoy_fdf.groupby("YEAR")[metric].sum().to_dict())
+    print("Month coverage per year:\n", fdf.groupby(["YEAR","MONTH"])[metric].sum().unstack().to_string())
+    if yoy_pct.empty:
+        st.info("YoY growth requires at least 2 complete years of data.")
+    else:
+        fig_yoy = px.bar(
+            yoy_pct, x="YEAR", y="YoY_pct", color="SECTORNAME",
+            barmode="group",
+            title="Year-over-Year Growth (%) by Sector",
+            labels={"YEAR": "Year", "YoY_pct": "YoY Change (%)", "SECTORNAME": "Sector"},
+            template="plotly_white",
+            color_discrete_sequence=px.colors.qualitative.Set2,
+        )
+        fig_yoy.add_hline(y=0, line_dash="dash", line_color="grey", line_width=1)
+        fig_yoy.update_layout(height=360)
+        st.plotly_chart(fig_yoy, use_container_width=True)
+else:
+    st.info("YoY growth chart is shown for volume/revenue metrics. Switch the primary metric.")
+#--------
+# Price vs Sales Volume
+#--------
+st.subheader("Price vs Sales Volume Over Time")
+price_sales = fdf.groupby("PERIOD").agg(
+    SALES=("SALES", "sum"),
+    PRICE=("PRICE", "mean")
+).reset_index().sort_values("PERIOD")
 
-# ── Row 4: Detailed data table ────────────────────────────────────────────────
-with st.expander("View underlying data", expanded=False):
-    display_cols = ["PERIOD", "STATEDESCRIPTION", "SECTORNAME",
-                    "SALES", "REVENUE", "PRICE", "CUSTOMERS"]
-    st.dataframe(
-        fdf[display_cols]
-        .sort_values(["PERIOD", "STATEDESCRIPTION", "SECTORNAME"])
-        .reset_index(drop=True),
-        use_container_width=True,
-        hide_index=True,
+fig_dual = go.Figure()
+fig_dual.add_trace(go.Bar(
+    x=price_sales["PERIOD"],
+    y=price_sales["SALES"],
+    name="Sales (MWh)",
+    marker_color="rgba(13,148,136,0.4)",
+    yaxis="y1",
+))
+fig_dual.add_trace(go.Scatter(
+    x=price_sales["PERIOD"],
+    y=price_sales["PRICE"],
+    name="Avg Price (¢/kWh)",
+    mode="lines+markers",
+    line=dict(color="#f97316", width=2),
+    marker=dict(size=4),
+    yaxis="y2",
+))
+fig_dual.update_layout(
+    title="Avg Retail Price vs Total Sales Volume",
+    xaxis_title="Month",
+    yaxis=dict(title="Sales (MWh)", ticksuffix=" MWh"),
+    yaxis2=dict(title="Avg Price (¢/kWh)", ticksuffix=" ¢", overlaying="y", side="right"),
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    template="plotly_white",
+    height=380,
+)
+st.plotly_chart(fig_dual, use_container_width=True)
+#--------
+# Sector Share Shift
+#--------
+st.subheader("Sector Share of Total Sales Over Time")
+sector_totals = fdf.groupby(["PERIOD", "SECTORNAME"])["SALES"].sum().reset_index()
+period_totals = sector_totals.groupby("PERIOD")["SALES"].transform("sum")
+sector_totals["SHARE_PCT"] = sector_totals["SALES"] / period_totals * 100
+
+fig_share = px.area(
+    sector_totals.sort_values("PERIOD"),
+    x="PERIOD",
+    y="SHARE_PCT",
+    color="SECTORNAME",
+    title="Sector share of total sales (%)",
+    labels={"PERIOD": "Month", "SHARE_PCT": "Share (%)", "SECTORNAME": "Sector"},
+    template="plotly_white",
+    groupnorm="percent",
+    color_discrete_sequence=px.colors.qualitative.Set2,
+)
+fig_share.update_layout(
+    legend_title_text="Sector",
+    height=380,
+    yaxis=dict(ticksuffix="%"),
+)
+st.plotly_chart(fig_share, use_container_width=True)
+#--------
+# Fuel Mix vs Retail Price
+#--------
+st.subheader("Fuel Mix vs Retail Price by State")
+st.caption(
+    "Each point is one state in one month. X-axis is the share of electricity generated "
+    "from fossil fuels (gas + coal). Y-axis is the average retail price consumers pay. "
+    "States that rely heavily on fossil fuels do not always have higher prices — "
+    "paid-off coal infrastructure can keep prices low despite high fossil dependence."
+)
+ 
+if joined_df.empty:
+    st.info("Generation mix data not available. Check the operations pipeline.")
+else:
+    # Filter to the same date range as the rest of the page
+    jdf = joined_df[
+        (joined_df["PERIOD"] >= start_date) &
+        (joined_df["PERIOD"] <= end_date)
+    ].dropna(subset=["FOSSIL_PCT", "AVG_PRICE"])
+ 
+    if jdf.empty:
+        st.info("No overlapping data between sales and generation tables for this date range.")
+    else:
+        fig_scatter = px.scatter(
+            jdf,
+            x="FOSSIL_PCT",
+            y="AVG_PRICE",
+            color="RENEWABLE_PCT",
+            hover_name="STATEDESCRIPTION",
+            hover_data={"PERIOD": "|%b %Y", "FOSSIL_PCT": ":.1f", "RENEWABLE_PCT": ":.1f", "AVG_PRICE": ":.2f"},
+            color_continuous_scale="RdYlGn",
+            labels={
+                "FOSSIL_PCT":    "Fossil share of generation (%)",
+                "AVG_PRICE":     "Avg retail price (¢/kWh)",
+                "RENEWABLE_PCT": "Renewable share (%)",
+            },
+            title="Fossil generation share vs retail price — all states, all months",
+            template="plotly_white",
+            opacity=0.7,
+        )
+        # Add a trend line via OLS
+        import numpy as np
+        z = np.polyfit(jdf["FOSSIL_PCT"].dropna(), jdf["AVG_PRICE"].dropna(), 1)
+        x_range = pd.Series([jdf["FOSSIL_PCT"].min(), jdf["FOSSIL_PCT"].max()])
+        fig_scatter.add_trace(go.Scatter(
+            x=x_range,
+            y=z[0] * x_range + z[1],
+            mode="lines",
+            line=dict(color="grey", dash="dash", width=1.5),
+            name="Trend",
+            showlegend=True,
+        ))
+        fig_scatter.update_layout(height=440, coloraxis_colorbar=dict(title="Renewable %"))
+        st.plotly_chart(fig_scatter, use_container_width=True)
+ 
+#--------
+# Renewable Penetration vs Retail Price (evolving trend)
+#--------
+st.subheader("Renewable Penetration vs Retail Price Over Time")
+st.caption(
+    "States are grouped into four quartiles by their average renewable generation share. "
+    "The lines show how each group's average retail price has moved over time. "
+    "If high-renewable states are getting cheaper relative to low-renewable states, "
+    "the gap between the top and bottom lines will narrow — evidence that the long-run "
+    "cost parity hypothesis is playing out. If the gap widens, transition infrastructure "
+    "costs are still dominating."
+)
+ 
+if joined_df.empty:
+    st.info("Generation mix data not available. Check the operations pipeline.")
+else:
+    # Assign each state to a renewable quartile based on its average renewable share
+    # across the full dataset (not just filtered window) so quartiles are stable
+    state_avg_renewable = (
+        joined_df.groupby("LOCATION")["RENEWABLE_PCT"]
+        .mean()
+        .reset_index()
+        .rename(columns={"RENEWABLE_PCT": "AVG_RENEWABLE_PCT"})
     )
-    st.caption(f"{len(fdf):,} rows matching current filters.")
+    state_avg_renewable["QUARTILE"] = pd.qcut(
+        state_avg_renewable["AVG_RENEWABLE_PCT"],
+        q=4,
+        labels=["Q1 Low renewable", "Q2", "Q3", "Q4 High renewable"],
+    )
+ 
+    jdf_q = joined_df.merge(state_avg_renewable[["LOCATION", "QUARTILE"]], on="LOCATION", how="left")
+    jdf_q = jdf_q[
+        (jdf_q["PERIOD"] >= start_date) &
+        (jdf_q["PERIOD"] <= end_date)
+    ].dropna(subset=["AVG_PRICE", "QUARTILE"])
+ 
+    if jdf_q.empty:
+        st.info("No overlapping data for this date range.")
+    else:
+        quartile_trend = (
+            jdf_q.groupby(["PERIOD", "QUARTILE"])["AVG_PRICE"]
+            .mean()
+            .reset_index()
+            .sort_values("PERIOD")
+        )
+ 
+        fig_quartile = px.line(
+            quartile_trend,
+            x="PERIOD",
+            y="AVG_PRICE",
+            color="QUARTILE",
+            markers=True,
+            title="Avg retail price by renewable generation quartile",
+            labels={"PERIOD": "Month", "AVG_PRICE": "Avg retail price (¢/kWh)", "QUARTILE": "Renewable tier"},
+            template="plotly_white",
+            color_discrete_sequence=["#ef4444", "#f97316", "#22c55e", "#0d9488"],
+        )
+        for trace in fig_quartile.data:
+            r, g, b = int(trace.line.color[1:3], 16), int(trace.line.color[3:5], 16), int(trace.line.color[5:7], 16)
+            trace.update(
+                fill="tozeroy",
+                fillcolor=f"rgba({r},{g},{b},0.08)",
+                line_width=2,
+                marker_size=4,
+            )
+        fig_quartile.update_layout(
+            height=420,
+            yaxis=dict(ticksuffix=" ¢"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        )
+        st.plotly_chart(fig_quartile, use_container_width=True)

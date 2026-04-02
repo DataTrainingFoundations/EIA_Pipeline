@@ -4,7 +4,7 @@ Tracks hourly electricity generation by fuel type across balancing authorities.
 Surfaces which BAs are most dependent on fossil fuels right now and shows
 renewable vs fossil share trends.
 """
-
+# pylint: disable=import-error
 from __future__ import annotations
 
 import pandas as pd

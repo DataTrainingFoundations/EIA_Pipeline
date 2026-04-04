@@ -29,6 +29,14 @@ def iter_datasets() -> list[dict]:
     return load_registry()
 
 
+def iter_ingest_datasets() -> list[dict]:
+    return load_registry()
+
+
+def iter_transform_datasets() -> list[dict]:
+    return [dataset for dataset in load_registry() if dataset.get("transform_enabled", False)]
+
+
 def get_dataset(dataset_id: str) -> dict:
     for dataset in load_registry():
         if dataset["id"] == dataset_id:

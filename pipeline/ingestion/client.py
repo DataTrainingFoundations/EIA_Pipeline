@@ -8,6 +8,14 @@ import requests
 from pipeline.core.settings import EiaSettings
 
 
+def _append_query_value(query: dict[str, Any], key: str, value: Any) -> None:
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _append_query_value(query, key, item)
+        return
+    query.setdefault(key, []).append(value)
+
+
 def fetch_page(
     settings: EiaSettings,
     route: str,
@@ -25,11 +33,11 @@ def fetch_page(
     for key, value in params.items():
         if key == "data":
             for item in value:
-                query.setdefault("data[]", []).append(item)
+                _append_query_value(query, "data[]", item)
         elif key == "facets":
             for facet_key, facet_values in value.items():
                 for facet_value in facet_values:
-                    query.setdefault(f"facets[{facet_key}][]", []).append(facet_value)
+                    _append_query_value(query, f"facets[{facet_key}][]", facet_value)
         elif key == "sort":
             for index, sort_item in enumerate(value):
                 query[f"sort[{index}][column]"] = sort_item["column"]

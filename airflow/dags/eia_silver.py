@@ -10,7 +10,7 @@ from airflow.operators.python import PythonOperator
 from airflow.sensors.python import PythonSensor
 from airflow.utils.dates import days_ago
 
-from pipeline.core.registry import get_dataset, iter_datasets, normalize_dataset_id
+from pipeline.core.registry import get_dataset, iter_transform_datasets, normalize_dataset_id
 from pipeline.core.settings import load_snowflake_settings
 from pipeline.core.snowflake import close_session, get_snowpark_session, rows_exist_for_date
 from pipeline.core.windowing import resolve_processing_date
@@ -59,7 +59,7 @@ with DAG(
     max_active_runs=1,
     params={"date": ""},
 ) as dag:
-    for dataset in iter_datasets():
+    for dataset in iter_transform_datasets():
         sense_task = PythonSensor(
             task_id=f"sense_raw__{dataset['id']}",
             python_callable=_snowflake_rows_exist,

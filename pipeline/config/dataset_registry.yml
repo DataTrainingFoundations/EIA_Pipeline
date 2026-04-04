@@ -4,7 +4,9 @@ datasets:
     snowflake_table: ELECTRICITY_GENERATION_RAW
     eia_route: "electricity/rto/fuel-type-data"
     frequency: "hourly"
+    transform_enabled: true
     rolling_days: 7
+    chunk_days: 7
     params:
       frequency: hourly
       data:
@@ -35,7 +37,9 @@ datasets:
     snowflake_table: ELECTRICITY_DEMAND_RAW
     eia_route: "electricity/rto/region-data"
     frequency: "hourly"
+    transform_enabled: true
     rolling_days: 7
+    chunk_days: 7
     params:
       frequency: hourly
       data:
@@ -47,7 +51,7 @@ datasets:
       sort:
         - column: period
           direction: desc
-      length: 500
+      length: 5000
     schema:
       period: string
       respondent: string
@@ -56,3 +60,134 @@ datasets:
       type-name: string
       value: float
       value-units: string
+
+  - id: electricity_retail_sales_monthly
+    name: "Electricity Retail Sales to Ultimate Customer (Monthly)"
+    snowflake_table: ELECTRICITY_RETAIL_SALES_RAW
+    eia_route: "electricity/retail-sales/data"
+    frequency: "monthly"
+    transform_enabled: false
+    rolling_months: 24
+    chunk_months: 12
+    params:
+      frequency: monthly
+      data:
+        - customers
+        - price
+        - revenue
+        - sales
+      facets: {}
+      sort:
+        - column: period
+          direction: desc
+      length: 5000
+    schema:
+      period: string
+      stateid: string
+      stateDescription: string
+      sectorid: string
+      sectorName: string
+      customers: float
+      price: float
+      revenue: float
+      sales: float
+
+  - id: electricity_power_operational_data_monthly
+    name: "Electric Power Operational Data (Monthly)"
+    snowflake_table: ELECTRICITY_POWER_OPERATIONAL_RAW
+    eia_route: "electricity/electric-power-operational-data"
+    frequency: "monthly"
+    transform_enabled: false
+    rolling_months: 24
+    chunk_months: 12
+    facet_chunk_key: location
+    facet_chunk_size: 8
+    params:
+      frequency: monthly
+      data:
+        - ash-content
+        - consumption-for-eg
+        - generation
+        - heat-content
+      facets:
+        location:
+          - AK
+          - AL
+          - AR
+          - AZ
+          - CA
+          - CO
+          - CT
+          - DC
+          - DE
+          - ENC
+          - ESC
+          - FL
+          - GA
+          - HI
+          - IA
+          - ID
+          - IL
+          - IN
+          - KS
+          - KY
+          - LA
+          - MA
+          - MAT
+          - MD
+          - ME
+          - MI
+          - MN
+          - MO
+          - MS
+          - MT
+          - MTN
+          - NC
+          - ND
+          - NE
+          - NEW
+          - NH
+          - NJ
+          - NM
+          - NV
+          - NY
+          - OH
+          - OK
+          - OR
+          - PA
+          - PCC
+          - PCN
+          - PR
+          - RI
+          - SAT
+          - SC
+          - SD
+          - TN
+          - TX
+          - US
+          - UT
+          - VA
+          - VT
+          - WA
+          - WI
+          - WNC
+          - WSC
+          - WV
+          - WY
+      sort:
+        - column: period
+          direction: desc
+      length: 500
+    schema:
+      period: string
+      location: string
+      location-name: string
+      stateDescription: string
+      sectorid: integer
+      sectorDescription: string
+      fueltypeid: string
+      fuelTypeDescription: string
+      ash-content: float
+      consumption-for-eg: float
+      generation: float
+      heat-content: float

@@ -7,7 +7,7 @@ from airflow.operators.python import PythonOperator
 from airflow.sensors.python import PythonSensor
 from airflow.utils.dates import days_ago
 
-from pipeline.core.registry import get_silver_table_name, iter_datasets
+from pipeline.core.registry import get_silver_table_name, iter_transform_datasets
 from pipeline.core.settings import load_snowflake_settings
 from pipeline.core.snowflake import close_session, get_snowpark_session, table_has_rows_for_partition_date
 from pipeline.core.windowing import resolve_processing_date
@@ -19,7 +19,7 @@ def _all_silver_ready(**context) -> bool:
     settings = load_snowflake_settings(schema="SILVER")
     session = get_snowpark_session(settings)
     try:
-        for dataset in iter_datasets():
+        for dataset in iter_transform_datasets():
             silver_table = f"{settings.database}.SILVER.{get_silver_table_name(dataset['id'])}"
             if not table_has_rows_for_partition_date(session, silver_table, target_date):
                 return False

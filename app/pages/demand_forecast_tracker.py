@@ -210,7 +210,7 @@ watchlist_display = watchlist_df[
     }
 )
 st.dataframe(
-    watchlist_display.style.applymap(_style_watchlist, subset=["Priority"]),
+    watchlist_display.style.map(_style_watchlist, subset=["Priority"]),
     use_container_width=True,
     hide_index=True,
 )

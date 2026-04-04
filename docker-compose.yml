@@ -85,3 +85,4 @@ services:
       retries: 20
     volumes:
       - ./app:/app
+      - ./pipeline:/app/pipeline

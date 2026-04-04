@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from snowflake.snowpark import Window
 from snowflake.snowpark.functions import (
     col,
     concat,
@@ -8,11 +9,14 @@ from snowflake.snowpark.functions import (
     max as sf_max,
     md5,
     round as sf_round,
+    row_number,
     sum as sf_sum,
     to_date,
+    when,
 )
 
 from pipeline.core.registry import get_gold_table_names
+from pipeline.core.snowflake import table_exists
 
 GEN_STABLE_COLS = [
     "period_ts",
@@ -30,6 +34,32 @@ DEM_STABLE_COLS = [
     "demand_type_name",
     "value_gwh",
 ]
+SALES_STABLE_COLS = [
+    "period",
+    "period_ts",
+    "stateid",
+    "state_description",
+    "sectorid",
+    "sector_name",
+    "customers",
+    "price",
+    "revenue",
+    "sales",
+    "partition_date",
+]
+OPS_STABLE_COLS = [
+    "period",
+    "period_ts",
+    "location",
+    "state_description",
+    "sectorid",
+    "fueltypeid",
+    "generation",
+    "partition_date",
+]
+RENEWABLE_FUELS = {"SUN", "WND", "WAT"}
+FOSSIL_FUELS = {"NG", "COL"}
+NUCLEAR_FUELS = {"NUC"}
 
 
 def _silver_table(database: str, table_name: str) -> str:
@@ -70,6 +100,13 @@ def _write_dimension_table(df, full_table_name: str) -> int:
     return count
 
 
+def _write_full_table(df, full_table_name: str) -> int:
+    output = df.with_column("gold_processed_at", current_timestamp())
+    count = output.count()
+    output.write.mode("overwrite").save_as_table(full_table_name)
+    return count
+
+
 def _stabilize_generation(df):
     return (
         df.select(*GEN_STABLE_COLS)
@@ -84,6 +121,95 @@ def _stabilize_demand(df):
         .dropna(subset=["period_ts", "respondent", "type"])
         .drop_duplicates(DEM_STABLE_COLS)
     )
+
+
+def _stabilize_monthly_sales(df):
+    window = Window.partition_by("period", "stateid", "sectorid").order_by(col("partition_date").desc())
+    return (
+        df.select(*SALES_STABLE_COLS)
+        .dropna(subset=["period", "stateid", "sectorid"])
+        .with_column("row_rank", row_number().over(window))
+        .filter(col("row_rank") == 1)
+        .drop("row_rank")
+        .filter(col("sectorid") != lit("ALL"))
+    )
+
+
+def _stabilize_monthly_ops(df):
+    window = Window.partition_by("period", "location", "sectorid", "fueltypeid").order_by(col("partition_date").desc())
+    return (
+        df.select(*OPS_STABLE_COLS)
+        .dropna(subset=["period", "location", "sectorid", "fueltypeid"])
+        .with_column("row_rank", row_number().over(window))
+        .filter(col("row_rank") == 1)
+        .drop("row_rank")
+    )
+
+
+def _safe_pct(numerator, denominator):
+    return when(denominator > lit(0), sf_round(numerator / denominator * 100, 2)).otherwise(lit(None))
+
+
+def _build_monthly_operational_sales(session, database: str, target_date: str, gold_tables: dict[str, str]) -> int:
+    sales_table = _silver_table(database, "SILVER_ELECTRICITY_RETAIL_SALES")
+    ops_table = _silver_table(database, "SILVER_ELECTRICITY_POWER_OPERATIONAL_DATA")
+    if not table_exists(session, sales_table) or not table_exists(session, ops_table):
+        return 0
+
+    sales_df = _stabilize_monthly_sales(session.table(sales_table))
+    ops_df = _stabilize_monthly_ops(session.table(ops_table))
+    if sales_df.count() == 0 or ops_df.count() == 0:
+        return 0
+
+    mix_df = (
+        ops_df.group_by("period", "location", "state_description")
+        .agg(
+            sf_round(sf_sum("generation"), 4).alias("generation"),
+            sf_round(
+                sf_sum(when(col("fueltypeid").isin(list(FOSSIL_FUELS)), col("generation")).otherwise(lit(0.0))),
+                4,
+            ).alias("fossil_generation"),
+            sf_round(
+                sf_sum(when(col("fueltypeid").isin(list(RENEWABLE_FUELS)), col("generation")).otherwise(lit(0.0))),
+                4,
+            ).alias("renewable_generation"),
+            sf_round(
+                sf_sum(when(col("fueltypeid").isin(list(NUCLEAR_FUELS)), col("generation")).otherwise(lit(0.0))),
+                4,
+            ).alias("nuclear_generation"),
+        )
+        .select(
+            col("period"),
+            col("location").alias("stateid"),
+            col("state_description"),
+            col("generation"),
+            _safe_pct(col("fossil_generation"), col("generation")).alias("fossil_pct"),
+            _safe_pct(col("renewable_generation"), col("generation")).alias("renewable_pct"),
+            _safe_pct(col("nuclear_generation"), col("generation")).alias("nuclear_pct"),
+        )
+    )
+
+    combined = (
+        sales_df.join(mix_df, on=["period", "stateid", "state_description"], how="left")
+        .select(
+            _record_hash(col("period"), col("stateid"), col("sectorid")).alias("record_id"),
+            to_date(col("period_ts")).alias("period"),
+            col("stateid"),
+            col("state_description"),
+            col("sectorid"),
+            col("sector_name"),
+            col("customers"),
+            col("price"),
+            col("revenue"),
+            col("sales"),
+            col("generation"),
+            col("fossil_pct"),
+            col("renewable_pct"),
+            col("nuclear_pct"),
+            lit(target_date).alias("partition_date"),
+        )
+    )
+    return _write_full_table(combined, _gold_table(database, gold_tables["gold_electricity_operational_sales"]))
 
 
 def run_gold(session, target_date: str, database: str) -> dict[str, int]:
@@ -119,9 +245,7 @@ def run_gold(session, target_date: str, database: str) -> dict[str, int]:
             lit(target_date).alias("partition_date"),
         )
     )
-    results["fact_generation_hourly"] = _write_partitioned_table(
-        session, fact_generation, fact_generation_name, target_date
-    )
+    results["fact_generation_hourly"] = _write_partitioned_table(session, fact_generation, fact_generation_name, target_date)
 
     demand_actual = (
         dem_df.filter(col("type") == "D")
@@ -142,9 +266,7 @@ def run_gold(session, target_date: str, database: str) -> dict[str, int]:
         col("forecast_gwh"),
         lit(target_date).alias("partition_date"),
     )
-    results["fact_demand_hourly"] = _write_partitioned_table(
-        session, fact_demand, fact_demand_name, target_date
-    )
+    results["fact_demand_hourly"] = _write_partitioned_table(session, fact_demand, fact_demand_name, target_date)
 
     agg_generation = (
         gen_df.with_column("report_date", to_date("period_ts"))
@@ -158,9 +280,7 @@ def run_gold(session, target_date: str, database: str) -> dict[str, int]:
             lit(target_date).alias("partition_date"),
         )
     )
-    results["agg_daily_generation"] = _write_partitioned_table(
-        session, agg_generation, agg_generation_name, target_date
-    )
+    results["agg_daily_generation"] = _write_partitioned_table(session, agg_generation, agg_generation_name, target_date)
 
     agg_demand_peak = (
         dem_df.filter(col("type") == "D")
@@ -175,9 +295,7 @@ def run_gold(session, target_date: str, database: str) -> dict[str, int]:
             lit(target_date).alias("partition_date"),
         )
     )
-    results["agg_daily_demand_peak"] = _write_partitioned_table(
-        session, agg_demand_peak, agg_demand_peak_name, target_date
-    )
+    results["agg_daily_demand_peak"] = _write_partitioned_table(session, agg_demand_peak, agg_demand_peak_name, target_date)
 
     dim_ba = (
         session.table(fact_generation_name)
@@ -189,4 +307,7 @@ def run_gold(session, target_date: str, database: str) -> dict[str, int]:
 
     dim_fuel = session.table(fact_generation_name).select(col("fuel_code"), col("fuel_name")).drop_duplicates(["fuel_code"])
     results["dim_fuel_type"] = _write_dimension_table(dim_fuel, dim_fuel_name)
+    results["gold_electricity_operational_sales"] = _build_monthly_operational_sales(
+        session, database, target_date, gold_tables
+    )
     return results

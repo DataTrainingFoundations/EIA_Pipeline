@@ -5,6 +5,8 @@ datasets:
     eia_route: "electricity/rto/fuel-type-data"
     frequency: "hourly"
     transform_enabled: true
+    scheduled_ingest: true
+    scheduled_transform: true
     rolling_days: 7
     chunk_days: 7
     params:
@@ -38,6 +40,8 @@ datasets:
     eia_route: "electricity/rto/region-data"
     frequency: "hourly"
     transform_enabled: true
+    scheduled_ingest: true
+    scheduled_transform: true
     rolling_days: 7
     chunk_days: 7
     params:
@@ -66,7 +70,9 @@ datasets:
     snowflake_table: ELECTRICITY_RETAIL_SALES_RAW
     eia_route: "electricity/retail-sales/data"
     frequency: "monthly"
-    transform_enabled: false
+    transform_enabled: true
+    scheduled_ingest: false
+    scheduled_transform: false
     rolling_months: 24
     chunk_months: 12
     params:
@@ -97,7 +103,9 @@ datasets:
     snowflake_table: ELECTRICITY_POWER_OPERATIONAL_RAW
     eia_route: "electricity/electric-power-operational-data"
     frequency: "monthly"
-    transform_enabled: false
+    transform_enabled: true
+    scheduled_ingest: false
+    scheduled_transform: false
     rolling_months: 24
     chunk_months: 12
     facet_chunk_key: location
@@ -174,10 +182,19 @@ datasets:
           - WSC
           - WV
           - WY
+        sectorid:
+          - 6
+        fueltypeid:
+          - NG
+          - COL
+          - NUC
+          - SUN
+          - WND
+          - WAT
       sort:
         - column: period
           direction: desc
-      length: 500
+      length: 5000
     schema:
       period: string
       location: string

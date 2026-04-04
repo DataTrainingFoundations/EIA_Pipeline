@@ -9,6 +9,9 @@ from data_access import (
     get_daily_generation_coverage,
     get_demand_coverage,
     get_generation_coverage,
+    get_monthly_sales_coverage,
+    qualified_table,
+    SILVER_ELECTRICITY_RETAIL_SALES,
     table_has_rows,
 )
 
@@ -35,8 +38,8 @@ st.markdown(
     """
 <div class="hero-copy">
 Gold serves a dashboard-friendly star schema: hourly facts for generation and demand,
-small shared dimensions, and daily aggregates for trend monitoring. Use the pages below
-to inspect the latest balancing-authority conditions and the broader fuel mix.
+small shared dimensions, daily aggregates for trend monitoring, and a monthly sales mart
+for longer-horizon state and sector analysis.
 </div>
 """,
     unsafe_allow_html=True,
@@ -52,7 +55,7 @@ except Exception as exc:
     st.error(f"Database connection failed: {exc}")
     st.stop()
 
-card_left, card_right = st.columns(2)
+card_left, card_mid, card_right = st.columns(3)
 with card_left:
     st.markdown(
         """
@@ -67,7 +70,7 @@ with card_left:
     if hasattr(st, "page_link"):
         st.page_link("pages/generation_mix_monitor.py", label="Open Generation Mix Monitor")
 
-with card_right:
+with card_mid:
     st.markdown(
         """
 <div class="dashboard-card">
@@ -81,8 +84,22 @@ with card_right:
     if hasattr(st, "page_link"):
         st.page_link("pages/demand_forecast_tracker.py", label="Open Demand & Forecast Tracker")
 
+with card_right:
+    st.markdown(
+        """
+<div class="dashboard-card">
+    <h3>Monthly Sales Trends</h3>
+    <p>Track monthly retail sales, revenue, price, and customers by state and sector, with fuel-mix overlays when available.</p>
+    <p><strong>Uses:</strong> GOLD_ELECTRICITY_OPERATIONAL_SALES, SILVER_ELECTRICITY_RETAIL_SALES</p>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+    if hasattr(st, "page_link"):
+        st.page_link("pages/monthly_sales_trends.py", label="Open Monthly Sales Trends")
+
 st.subheader("Data coverage")
-cov_left, cov_mid, cov_right = st.columns(3)
+cov_left, cov_mid, cov_right, cov_far = st.columns(4)
 
 if table_has_rows("FACT_GENERATION_HOURLY"):
     cov = get_generation_coverage()
@@ -107,6 +124,15 @@ if table_has_rows("AGG_DAILY_GENERATION"):
     cov_right.caption(f"Coverage: {cov['min_date']} to {cov['max_date']}")
 else:
     cov_right.warning("No daily generation aggregates yet.")
+
+if table_has_rows(qualified_table("SILVER", SILVER_ELECTRICITY_RETAIL_SALES)):
+    cov = get_monthly_sales_coverage()
+    cov_far.metric("Monthly sales rows", f"{int(cov['row_count']):,}")
+    cov_far.caption(f"{cov['state_count']} states")
+    cov_far.caption(f"{cov['sector_count']} sectors")
+    cov_far.caption(f"Latest period: {cov['max_period']}")
+else:
+    cov_far.warning("No monthly sales data yet.")
 
 st.info(
     "The normal refresh chain is eia_ingest -> eia_silver -> eia_gold. "

@@ -22,6 +22,7 @@ Gold shape:
 - `DIM_FUEL_TYPE`
 - `AGG_DAILY_GENERATION`
 - `AGG_DAILY_DEMAND_PEAK`
+- `GOLD_ELECTRICITY_OPERATIONAL_SALES`
 
 The gold layer is intentionally a pragmatic star-schema-style serving model for the Streamlit app.
 
@@ -69,3 +70,4 @@ Streamlit: `http://localhost:28501`
 - All substantive pipeline logic now lives under `pipeline/`.
 - Snowflake is the source of truth for RAW, SILVER, and GOLD data.
 - dbt remains the planned testing layer on top of Snowflake.
+- Monthly retail sales and operational datasets are supported, but they are not part of the default hourly Airflow loop.

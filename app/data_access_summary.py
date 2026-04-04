@@ -12,9 +12,13 @@ from data_access_shared import (
     DIM_FUEL_TYPE,
     FACT_DEMAND_HOURLY,
     FACT_GENERATION_HOURLY,
+    SILVER_ELECTRICITY_RETAIL_SALES,
     _safe_read_sql,
+    qualified_table,
     get_connection,
 )
+
+MONTHLY_SALES_TABLE = qualified_table("SILVER", SILVER_ELECTRICITY_RETAIL_SALES)
 
 
 @st.cache_data(ttl=60)
@@ -64,6 +68,21 @@ def get_daily_generation_coverage() -> dict[str, Any]:
         max(report_date) as max_date,
         count(*) as row_count
     from {AGG_DAILY_GENERATION}
+    """
+    return _safe_read_sql(query).iloc[0].to_dict()
+
+
+@st.cache_data(ttl=60)
+def get_monthly_sales_coverage() -> dict[str, Any]:
+    query = f"""
+    select
+        min(period) as min_period,
+        max(period) as max_period,
+        count(*) as row_count,
+        count(distinct stateid) as state_count,
+        count(distinct sectorid) as sector_count
+    from {MONTHLY_SALES_TABLE}
+    where sectorid != 'ALL'
     """
     return _safe_read_sql(query).iloc[0].to_dict()
 

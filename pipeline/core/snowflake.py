@@ -62,3 +62,11 @@ def table_has_rows_for_partition_date(session, table_name: str, target_date: str
         return bool(result and result[0]["N"] > 0)
     except Exception:
         return False
+
+
+def table_exists(session, table_name: str) -> bool:
+    try:
+        session.table(table_name).limit(1).collect()
+        return True
+    except Exception:
+        return False

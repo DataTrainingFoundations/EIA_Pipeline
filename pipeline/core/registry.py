@@ -13,6 +13,7 @@ GOLD_TABLES = {
     "fact_demand_hourly": "FACT_DEMAND_HOURLY",
     "agg_daily_generation": "AGG_DAILY_GENERATION",
     "agg_daily_demand_peak": "AGG_DAILY_DEMAND_PEAK",
+    "gold_electricity_operational_sales": "GOLD_ELECTRICITY_OPERATIONAL_SALES",
 }
 
 
@@ -35,6 +36,19 @@ def iter_ingest_datasets() -> list[dict]:
 
 def iter_transform_datasets() -> list[dict]:
     return [dataset for dataset in load_registry() if dataset.get("transform_enabled", False)]
+
+
+def iter_scheduled_ingest_datasets() -> list[dict]:
+    return [dataset for dataset in load_registry() if dataset.get("scheduled_ingest", dataset.get("frequency") == "hourly")]
+
+
+def iter_scheduled_transform_datasets() -> list[dict]:
+    return [
+        dataset
+        for dataset in load_registry()
+        if dataset.get("transform_enabled", False)
+        and dataset.get("scheduled_transform", dataset.get("frequency") == "hourly")
+    ]
 
 
 def get_dataset(dataset_id: str) -> dict:

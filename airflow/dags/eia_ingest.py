@@ -9,7 +9,7 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.utils.dates import days_ago
 
-from pipeline.core.registry import iter_ingest_datasets
+from pipeline.core.registry import iter_scheduled_ingest_datasets
 
 _SNOWFLAKE_ENV_KEYS = [
     "SNOWFLAKE_ACCOUNT",
@@ -62,7 +62,7 @@ with DAG(
     max_active_runs=1,
     params={"start_date": "", "end_date": "", "rolling_hours": ""},
 ) as dag:
-    for dataset in iter_ingest_datasets():
+    for dataset in iter_scheduled_ingest_datasets():
         PythonOperator(
             task_id=f"ingest__{dataset['id']}",
             python_callable=_ingest_dataset,

@@ -13,6 +13,9 @@ AGG_DAILY_GENERATION = "AGG_DAILY_GENERATION"
 AGG_DAILY_DEMAND_PEAK = "AGG_DAILY_DEMAND_PEAK"
 DIM_BALANCING_AUTHORITY = "DIM_BALANCING_AUTHORITY"
 DIM_FUEL_TYPE = "DIM_FUEL_TYPE"
+SILVER_ELECTRICITY_RETAIL_SALES = "SILVER_ELECTRICITY_RETAIL_SALES"
+SILVER_ELECTRICITY_POWER_OPERATIONAL_DATA = "SILVER_ELECTRICITY_POWER_OPERATIONAL_DATA"
+GOLD_ELECTRICITY_OPERATIONAL_SALES = "GOLD_ELECTRICITY_OPERATIONAL_SALES"
 
 
 def _connection_kwargs() -> dict[str, object]:
@@ -47,3 +50,8 @@ def sql_literal(value: str) -> str:
 
 def sql_in_list(values: list[str]) -> str:
     return ", ".join(sql_literal(value) for value in values)
+
+
+def qualified_table(schema: str, table_name: str) -> str:
+    settings = load_app_snowflake_settings()
+    return f"{settings.database}.{schema}.{table_name}"

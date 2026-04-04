@@ -12,7 +12,12 @@ def main() -> None:
     parser.add_argument(
         "--dataset",
         required=True,
-        choices=["electricity_generation", "electricity_demand"],
+        choices=[
+            "electricity_generation",
+            "electricity_demand",
+            "electricity_retail_sales",
+            "electricity_power_operational_data",
+        ],
     )
     parser.add_argument("--date", required=True, help="Processing date (YYYY-MM-DD)")
     args = parser.parse_args()

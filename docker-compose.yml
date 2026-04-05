@@ -154,6 +154,7 @@ services:
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./ingestion/src:/opt/airflow/ingestion/src
+      - ./spark/jobs:/opt/airflow/spark/jobs
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health > /dev/null"]
@@ -171,18 +172,18 @@ services:
       context: ./app
       dockerfile: Dockerfile
     environment:
-      POSTGRES_HOST:      postgres
-      POSTGRES_PORT:      "5432"
-      POSTGRES_DB:        ${POSTGRES_DB}
-      POSTGRES_USER:      ${POSTGRES_USER}
-      POSTGRES_PASSWORD:  ${POSTGRES_PASSWORD}
-      SNOWFLAKE_ACCOUNT:  ${SNOWFLAKE_ACCOUNT}
-      SNOWFLAKE_USER:     ${SNOWFLAKE_USER}
-      SNOWFLAKE_PASSWORD: ${SNOWFLAKE_PASSWORD}
-      SNOWFLAKE_ROLE:     ${SNOWFLAKE_ROLE}
+      POSTGRES_HOST:     postgres
+      POSTGRES_PORT:     "5432"
+      POSTGRES_DB:       ${POSTGRES_DB}
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      SNOWFLAKE_ACCOUNT:   ${SNOWFLAKE_ACCOUNT}
+      SNOWFLAKE_USER:      ${SNOWFLAKE_USER}
+      SNOWFLAKE_PASSWORD:  ${SNOWFLAKE_PASSWORD}
+      SNOWFLAKE_ROLE:      ${SNOWFLAKE_ROLE}
       SNOWFLAKE_WAREHOUSE: ${SNOWFLAKE_WAREHOUSE}
-      SNOWFLAKE_DATABASE: ${SNOWFLAKE_DATABASE}
-      SNOWFLAKE_SCHEMA:   ${SNOWFLAKE_SCHEMA}
+      SNOWFLAKE_DATABASE:  ${SNOWFLAKE_DATABASE}
+      SNOWFLAKE_SCHEMA:    ${SNOWFLAKE_SCHEMA}
     ports:
       - "28501:8501"
     healthcheck:

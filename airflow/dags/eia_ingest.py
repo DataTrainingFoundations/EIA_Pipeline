@@ -19,13 +19,26 @@ PIPELINE POSITION
 DATE WINDOW RESOLUTION (priority order)
 ----------------------------------------
 1. Manual trigger conf  — {"start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD"}
+                          Automatically split into chunk_days-sized chunks
+                          (default 30 days) and ingested sequentially per
+                          dataset so no single API call spans the full range.
 2. rolling_hours param  — {"rolling_hours": "48"}
 3. Default              — 2 hours (ROLLING_HOURS env var or hardcoded default)
+
+BACKFILL EXAMPLE
+----------------
+Trigger manually with:
+    {
+        "start_date":  "2024-01-01",
+        "end_date":    "2024-12-31",
+        "chunk_days":  30
+    }
+Each dataset ingests Jan, then Feb, ..., then Dec sequentially.
+Datasets still run in parallel with each other.
 
 SCHEDULE
 --------
 Every hour at :15 past.
-Trigger manually with {start_date, end_date} for any backfill range.
 
 ADDING NEW DATASETS
 -------------------
@@ -56,6 +69,7 @@ INGESTION_SRC = "/opt/airflow/ingestion/src"
 REGISTRY_PATH = Path(f"{INGESTION_SRC}/dataset_registry.yml")
 
 DEFAULT_ROLLING_HOURS = float(os.environ.get("ROLLING_HOURS", "2"))
+DEFAULT_CHUNK_DAYS    = 30
 
 # Snowflake vars forwarded to the subprocess environment
 _SNOWFLAKE_ENV_KEYS = [
@@ -76,18 +90,34 @@ def _load_registry() -> list[dict]:
         return yaml.safe_load(fh).get("datasets", [])
 
 
-def _resolve_window(conf: dict) -> tuple[str, str]:
+def _build_chunks(start_date: str, end_date: str, chunk_days: int) -> list[tuple[str, str]]:
     """
-    Return (start, end) EIA-format strings.
-    Priority: manual conf  >  rolling_hours conf  >  default rolling hours.
-    """
-    if conf.get("start_date") and conf.get("end_date"):
-        return f"{conf['start_date']}T00", f"{conf['end_date']}T23"
+    Split a date range into (chunk_start, chunk_end) pairs of at most
+    chunk_days each.  Both bounds are inclusive YYYY-MM-DD strings.
 
-    rolling_hours = float(conf.get("rolling_hours", DEFAULT_ROLLING_HOURS))
-    now   = datetime.now(timezone.utc)
-    start = now - timedelta(hours=rolling_hours)
+    Example: 2024-01-01 → 2024-12-31 with chunk_days=30 produces 13 chunks:
+        [("2024-01-01", "2024-01-30"),
+         ("2024-01-31", "2024-02-29"),
+         ...
+         ("2024-12-02", "2024-12-31")]
+    """
+    from datetime import date as date_type
+
+    start = date_type.fromisoformat(start_date)
+    end   = date_type.fromisoformat(end_date)
+    chunks: list[tuple[str, str]] = []
+    cursor = start
+    while cursor <= end:
+        chunk_end = min(cursor + timedelta(days=chunk_days - 1), end)
+        chunks.append((str(cursor), str(chunk_end)))
+        cursor = chunk_end + timedelta(days=1)
+    return chunks
+
+
+def _rolling_window() -> tuple[str, str]:
     fmt   = "%Y-%m-%dT%H"
+    now   = datetime.now(timezone.utc)
+    start = now - timedelta(hours=DEFAULT_ROLLING_HOURS)
     return start.strftime(fmt), now.strftime(fmt)
 
 
@@ -95,45 +125,66 @@ def _resolve_window(conf: dict) -> tuple[str, str]:
 
 def _ingest_dataset(dataset_id: str, **context) -> None:
     """
-    Resolve the date window for this run, then call fetch_eia.py for a
-    single dataset.  The subprocess inherits all SNOWFLAKE_* env vars so
-    publish_snowflake.py can open a Snowpark Session.
+    Resolve the date window(s) for this run and call fetch_eia.py once per
+    chunk.  Chunks are processed sequentially so each API call stays small
+    and a failure only loses one chunk, not the whole range.
+
+    For rolling / non-backfill runs there is always exactly one chunk.
     """
-    conf  = context["dag_run"].conf or {}
-    start, end = _resolve_window(conf)
+    conf       = context["dag_run"].conf or {}
+    start_date = conf.get("start_date", "").strip()
+    end_date   = conf.get("end_date",   "").strip()
 
-    context["ti"].xcom_push(
-        key=f"{dataset_id}_window",
-        value={"start": start, "end": end},
-    )
+    # ── Build list of (chunk_start, chunk_end) pairs ──────────────────────────
+    if start_date and end_date:
+        chunk_days = int(conf.get("chunk_days", DEFAULT_CHUNK_DAYS))
+        chunks     = _build_chunks(start_date, end_date, chunk_days)
+        print(
+            f"[ingest] {dataset_id}: backfill {start_date} -> {end_date} "
+            f"in {len(chunks)} chunk(s) of up to {chunk_days} days each."
+        )
+    else:
+        # Rolling window — single implicit chunk
+        rolling_hours = float(conf.get("rolling_hours", DEFAULT_ROLLING_HOURS))
+        now    = datetime.now(timezone.utc)
+        start  = now - timedelta(hours=rolling_hours)
+        fmt    = "%Y-%m-%d"
+        chunks = [(start.strftime(fmt), now.strftime(fmt))]
+        print(f"[ingest] {dataset_id}: rolling {rolling_hours}h window.")
 
-    env = {
+    base_env = {
         **os.environ,
-        "EIA_API_KEY":          os.environ.get("EIA_API_KEY", ""),
-        "BACKFILL_START_DATE":  start[:10],   # YYYY-MM-DD
-        "BACKFILL_END_DATE":    end[:10],
-        "TARGET_DATASET_ID":    dataset_id,
-        # Ensure all Snowflake vars are explicitly present
+        "EIA_API_KEY":       os.environ.get("EIA_API_KEY", ""),
+        "TARGET_DATASET_ID": dataset_id,
         **{k: os.environ.get(k, "") for k in _SNOWFLAKE_ENV_KEYS},
     }
 
-    print(f"[ingest] {dataset_id}  window: {start} -> {end}")
+    # ── Ingest each chunk sequentially ────────────────────────────────────────
+    for i, (chunk_start, chunk_end) in enumerate(chunks, 1):
+        print(f"[ingest] {dataset_id} chunk {i}/{len(chunks)}: {chunk_start} -> {chunk_end}")
 
-    result = subprocess.run(
-        ["python", "fetch_eia.py"],
-        cwd=INGESTION_SRC,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-    print(result.stdout)
-    if result.returncode != 0:
-        print(result.stderr)
-        raise RuntimeError(
-            f"fetch_eia.py failed for dataset '{dataset_id}':\n{result.stderr}"
+        env = {
+            **base_env,
+            "BACKFILL_START_DATE": chunk_start,
+            "BACKFILL_END_DATE":   chunk_end,
+        }
+
+        result = subprocess.run(
+            ["python", "fetch_eia.py"],
+            cwd=INGESTION_SRC,
+            env=env,
+            capture_output=True,
+            text=True,
         )
+        print(result.stdout)
+        if result.returncode != 0:
+            print(result.stderr)
+            raise RuntimeError(
+                f"fetch_eia.py failed for '{dataset_id}' "
+                f"chunk {chunk_start} -> {chunk_end}:\n{result.stderr}"
+            )
 
-    print(f"[ingest] {dataset_id} complete.")
+    print(f"[ingest] {dataset_id}: all {len(chunks)} chunk(s) complete.")
 
 
 # ── DAG ────────────────────────────────────────────────────────────────────────
@@ -161,7 +212,8 @@ with DAG(
     params={
         "start_date":    "",   # "YYYY-MM-DD" — leave blank for rolling window
         "end_date":      "",   # "YYYY-MM-DD" — leave blank for rolling window
-        "rolling_hours": "",   # e.g. "48"    — overrides the 2h default
+        "chunk_days":    "30", # days per backfill chunk; smaller = safer but more API calls
+        "rolling_hours": "",   # e.g. "48" — only used when start_date/end_date are blank
     },
 ) as dag:
 

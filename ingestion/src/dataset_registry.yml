@@ -1,7 +1,7 @@
 datasets:
   - id: electricity_generation_hourly
     name: "Electricity Generation by Source (Hourly)"
-    snowflake_table: ELECTRICITY_GENERATION_BRONZE   # written to SNOWFLAKE_DATABASE.SNOWFLAKE_SCHEMA
+    snowflake_table: ELECTRICITY_GENERATION_RAW   # written to SNOWFLAKE_DATABASE.SNOWFLAKE_SCHEMA
     eia_route: "electricity/rto/fuel-type-data"
     frequency: "hourly"
     rolling_days: 7
@@ -32,7 +32,7 @@ datasets:
 
   - id: electricity_demand_hourly
     name: "Electricity Demand by Region (Hourly)"
-    snowflake_table: ELECTRICITY_DEMAND_BRONZE       # written to SNOWFLAKE_DATABASE.SNOWFLAKE_SCHEMA
+    snowflake_table: ELECTRICITY_DEMAND_RAW        # written to SNOWFLAKE_DATABASE.SNOWFLAKE_SCHEMA
     eia_route: "electricity/rto/region-data"
     frequency: "hourly"
     rolling_days: 7
@@ -56,10 +56,10 @@ datasets:
       type-name: string
       value: float
       value-units: string
-    
+
   - id: electricity_retail_sales_monthly
     name: "Electricity Retail Sales to Ultimate Customer (Monthly)"
-    snowflake_table: ELECTRICITY_RETAIL_SALES_BRONZE    # written to SNOWFLAKE_DATABASE.SNOWFLAKE_SCHEMA
+    snowflake_table: ELECTRICITY_RETAIL_SALES_RAW    # written to SNOWFLAKE_DATABASE.SNOWFLAKE_SCHEMA
     eia_route: "electricity/retail-sales/data"
     frequency: "monthly"
     rolling_days: 30
@@ -84,3 +84,39 @@ datasets:
       price: float           # Average price ($/kWh)
       revenue: float         # Revenue ($)
       sales: float           # Sales in MWh
+
+  - id: electricity_power_operational_data_monthly
+    name: "Electric Power Operational Data (Monthly)"
+    snowflake_table: ELECTRICITY_POWER_OPERATIONAL_RAW  # written to SNOWFLAKE_DATABASE.SNOWFLAKE_SCHEMA
+    eia_route: "electricity/electric-power-operational-data"
+    frequency: "monthly"
+    rolling_months: 12                                  # default lookback for scheduled runs
+    backfill_start: "2010-01-01"                        # earliest available data; use as start_date for a full history backfill
+    params:
+      frequency: monthly
+      data:
+        - ash-content         # ash content of coal consumed (%)
+        - consumption-for-eg  # fuel consumption for electricity generation (MMBtu)
+        - generation          # net electricity generation (MWh)
+        - heat-content        # average heat content of fuel consumed (MMBtu/unit)
+      facets:
+        location:
+          - ["AK","AL","AR","AZ","CA","CO","CT","DC","DE","ENC","ESC","FL","GA","HI","IA","ID","IL","IN","KS","KY","LA","MA","MAT","MD","ME","MI","MN","MO","MS","MT","MTN","NC","ND","NE","NEW","NH","NJ","NM","NV","NY","OH","OK","OR","PA","PCC","PCN","PR","RI","SAT","SC","SD","TN","TX","US","UT","VA","VT","WA","WI","WNC","WSC","WV","WY"]
+      sort:
+        - column: period
+          direction: desc
+      length: 500
+    schema:
+      period: string           # e.g. "2024-01"
+      location: string         # e.g. "US"
+      location-name: string
+      stateDescription: string
+      sectorid: integer
+      sectorDescription: string
+      fueltypeid: string
+      fuelTypeDescription: string
+      ash-content: float
+      consumption-for-eg: float
+      generation: float
+      heat-content: float
+      value-units: string

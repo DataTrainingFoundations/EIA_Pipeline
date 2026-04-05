@@ -111,7 +111,7 @@ def _read_snowflake(snowpark, table: str, date: str) -> DataFrame:
         # .options(**sf_options)
         # .load()
         # # Filter to just the rows ingested on the target date
-        .filter(f"TRY_TO_DATE(_FETCHED_AT) = '{date}'")
+        .filter(f"LEFT(_FETCHED_AT, 10) = '{date}'")
     )
 
     #count = df.count()

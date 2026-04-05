@@ -95,7 +95,7 @@ def _all_silver_tables_ready(**context) -> bool:
             result = session.sql(f"""
                 SELECT COUNT(*) AS n
                 FROM {table}
-                WHERE TO_DATE(period_ts) = '{target_date}'
+                WHERE TO_DATE(silver_processed_at) = '{target_date}'
                 LIMIT 1
             """).collect()
 
@@ -143,7 +143,26 @@ def _run_gold(**context):
         raise RuntimeError(f"Gold job failed:\n{result.stderr}")
 
     print(f"[gold] Done for {target_date}")
+def _run_gold_monthly(**context):
+    env = {**os.environ}
 
+    print("[gold_monthly] Running monthly gold pipeline")
+
+    result = subprocess.run(
+        ["python", "gold_electricity_operational_sales.py"],  # replace with your monthly gold script
+        cwd=GOLD_SRC,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    print(result.stdout)
+
+    if result.returncode != 0:
+        print(result.stderr)
+        raise RuntimeError(f"Monthly gold job failed:\n{result.stderr}")
+
+    print("[gold_monthly] Done")
 
 # ── DAG ────────────────────────────────────────────────────────────────────────
 
@@ -176,5 +195,9 @@ with DAG(
         task_id="gold_aggregations",
         python_callable=_run_gold,
     )
+    run_gold_monthly = PythonOperator(
+    task_id="gold_monthly",
+    python_callable=_run_gold_monthly,
+)
 
-    sense_silver >> run_gold
+    sense_silver >> run_gold >> run_gold_monthly

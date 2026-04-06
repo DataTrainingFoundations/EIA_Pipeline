@@ -8,7 +8,6 @@ from snowflake.snowpark.functions import (
     max as sf_max,
     md5,
     round as sf_round,
-    row_number,
     sum as sf_sum,
     when,
 )
@@ -92,14 +91,14 @@ def _write_partitioned_table(session, df, full_table_name: str, partition_date: 
     output = df.with_column("gold_processed_at", current_timestamp())
     count = output.count()
     _delete_partition_if_present(session, full_table_name, partition_date)
-    output.write.mode("append").save_as_table(full_table_name)
+    output.write.mode("append").save_as_table(full_table_name, column_order="name")
     return count
 
 
 def _write_dimension_table(df, full_table_name: str) -> int:
     output = df.with_column("gold_processed_at", current_timestamp())
     count = output.count()
-    output.write.mode("overwrite").save_as_table(full_table_name)
+    output.write.mode("overwrite").save_as_table(full_table_name, column_order="name")
     return count
 
 
@@ -140,23 +139,16 @@ def _safe_pct(numerator, denominator):
     return when(denominator > lit(0), sf_round(numerator / denominator * 100, 2)).otherwise(lit(None))
 
 
-def _build_hourly_gold(session, target_date: str, database: str, gold_tables: dict[str, str]) -> dict[str, int]:
-    gen_df = session.table(_silver_table(database, "SILVER_ELECTRICITY_GENERATION")).filter(
-        col("partition_date") == lit(target_date)
-    )
-    dem_df = session.table(_silver_table(database, "SILVER_ELECTRICITY_DEMAND")).filter(
-        col("partition_date") == lit(target_date)
-    )
+def _build_hourly_generation_partition(session, target_date: str, database: str, gold_tables: dict[str, str]) -> dict[str, int]:
+    generation_silver = _silver_table(database, "SILVER_ELECTRICITY_GENERATION")
+    if not table_exists(session, generation_silver):
+        return {}
+    gen_df = session.table(generation_silver).filter(col("partition_date") == lit(target_date))
+    if gen_df.count() == 0:
+        return {}
     gen_df = _stabilize_generation(gen_df)
-    dem_df = _stabilize_demand(dem_df)
-
     fact_generation_name = _gold_table(database, gold_tables["fact_generation_hourly"])
-    fact_demand_name = _gold_table(database, gold_tables["fact_demand_hourly"])
     agg_generation_name = _gold_table(database, gold_tables["agg_daily_generation"])
-    agg_demand_peak_name = _gold_table(database, gold_tables["agg_daily_demand_peak"])
-    dim_ba_name = _gold_table(database, gold_tables["dim_balancing_authority"])
-    dim_fuel_name = _gold_table(database, gold_tables["dim_fuel_type"])
-    results: dict[str, int] = {}
 
     fact_generation = (
         gen_df.group_by("period_ts", "business_date", "respondent", "respondent_name", "fueltype", "fuel_type_name")
@@ -172,7 +164,33 @@ def _build_hourly_gold(session, target_date: str, database: str, gold_tables: di
             lit(target_date).alias("partition_date"),
         )
     )
-    results["fact_generation_hourly"] = _write_partitioned_table(session, fact_generation, fact_generation_name, target_date)
+    agg_generation = (
+        gen_df.group_by("business_date", "fueltype", "fuel_type_name")
+        .agg(sf_round(sf_sum("value_gwh"), 4).alias("total_gwh"))
+        .select(
+            col("business_date").alias("report_date"),
+            col("fueltype").alias("fuel_code"),
+            col("fuel_type_name").alias("fuel_name"),
+            col("total_gwh"),
+            lit(target_date).alias("partition_date"),
+        )
+    )
+    return {
+        "fact_generation_hourly": _write_partitioned_table(session, fact_generation, fact_generation_name, target_date),
+        "agg_daily_generation": _write_partitioned_table(session, agg_generation, agg_generation_name, target_date),
+    }
+
+
+def _build_hourly_demand_partition(session, target_date: str, database: str, gold_tables: dict[str, str]) -> dict[str, int]:
+    demand_silver = _silver_table(database, "SILVER_ELECTRICITY_DEMAND")
+    if not table_exists(session, demand_silver):
+        return {}
+    dem_df = session.table(demand_silver).filter(col("partition_date") == lit(target_date))
+    if dem_df.count() == 0:
+        return {}
+    dem_df = _stabilize_demand(dem_df)
+    fact_demand_name = _gold_table(database, gold_tables["fact_demand_hourly"])
+    agg_demand_peak_name = _gold_table(database, gold_tables["agg_daily_demand_peak"])
 
     demand_actual = (
         dem_df.filter(col("type") == "D")
@@ -193,21 +211,6 @@ def _build_hourly_gold(session, target_date: str, database: str, gold_tables: di
         col("forecast_gwh"),
         lit(target_date).alias("partition_date"),
     )
-    results["fact_demand_hourly"] = _write_partitioned_table(session, fact_demand, fact_demand_name, target_date)
-
-    agg_generation = (
-        gen_df.group_by("business_date", "fueltype", "fuel_type_name")
-        .agg(sf_round(sf_sum("value_gwh"), 4).alias("total_gwh"))
-        .select(
-            col("business_date").alias("report_date"),
-            col("fueltype").alias("fuel_code"),
-            col("fuel_type_name").alias("fuel_name"),
-            col("total_gwh"),
-            lit(target_date).alias("partition_date"),
-        )
-    )
-    results["agg_daily_generation"] = _write_partitioned_table(session, agg_generation, agg_generation_name, target_date)
-
     agg_demand_peak = (
         dem_df.filter(col("type") == "D")
         .group_by("business_date", "respondent", "respondent_name")
@@ -220,27 +223,18 @@ def _build_hourly_gold(session, target_date: str, database: str, gold_tables: di
             lit(target_date).alias("partition_date"),
         )
     )
-    results["agg_daily_demand_peak"] = _write_partitioned_table(session, agg_demand_peak, agg_demand_peak_name, target_date)
-
-    dim_ba = (
-        session.table(fact_generation_name)
-        .select(col("ba_code"), col("ba_name"))
-        .union(session.table(fact_demand_name).select(col("ba_code"), col("ba_name")))
-        .drop_duplicates(["ba_code"])
-    )
-    results["dim_balancing_authority"] = _write_dimension_table(dim_ba, dim_ba_name)
-
-    dim_fuel = session.table(fact_generation_name).select(col("fuel_code"), col("fuel_name")).drop_duplicates(["fuel_code"])
-    results["dim_fuel_type"] = _write_dimension_table(dim_fuel, dim_fuel_name)
-    return results
+    return {
+        "fact_demand_hourly": _write_partitioned_table(session, fact_demand, fact_demand_name, target_date),
+        "agg_daily_demand_peak": _write_partitioned_table(session, agg_demand_peak, agg_demand_peak_name, target_date),
+    }
 
 
-def _build_monthly_operational_sales(session, database: str, target_date: str, gold_tables: dict[str, str]) -> int:
+def _build_monthly_operational_sales(session, database: str, target_date: str, gold_tables: dict[str, str]) -> dict[str, int]:
     partition_date = month_anchor_date(target_date)
     sales_table = _silver_table(database, "SILVER_ELECTRICITY_RETAIL_SALES")
     ops_table = _silver_table(database, "SILVER_ELECTRICITY_POWER_OPERATIONAL_DATA")
     if not table_exists(session, sales_table) or not table_exists(session, ops_table):
-        return 0
+        return {}
 
     sales_df = _stabilize_monthly_sales(
         session.table(sales_table).filter(col("partition_date") == lit(partition_date))
@@ -249,7 +243,7 @@ def _build_monthly_operational_sales(session, database: str, target_date: str, g
         session.table(ops_table).filter(col("partition_date") == lit(partition_date))
     )
     if sales_df.count() == 0 or ops_df.count() == 0:
-        return 0
+        return {}
 
     mix_df = (
         ops_df.group_by("period", "business_date", "state_id", "state_description")
@@ -301,17 +295,53 @@ def _build_monthly_operational_sales(session, database: str, target_date: str, g
         )
     )
     monthly_table = _gold_table(database, gold_tables["gold_electricity_operational_sales"])
-    return _write_partitioned_table(session, combined, monthly_table, partition_date)
+    return {
+        "gold_electricity_operational_sales": _write_partitioned_table(session, combined, monthly_table, partition_date)
+    }
+
+
+def refresh_gold_dimensions(session, *, database: str, scope: str) -> dict[str, int]:
+    if scope not in {"hourly", "all"}:
+        return {}
+    gold_tables = get_gold_table_names()
+    results: dict[str, int] = {}
+    fact_generation_name = _gold_table(database, gold_tables["fact_generation_hourly"])
+    fact_demand_name = _gold_table(database, gold_tables["fact_demand_hourly"])
+    dim_ba_name = _gold_table(database, gold_tables["dim_balancing_authority"])
+    dim_fuel_name = _gold_table(database, gold_tables["dim_fuel_type"])
+
+    if table_exists(session, fact_generation_name) or table_exists(session, fact_demand_name):
+        ba_frames = []
+        if table_exists(session, fact_generation_name):
+            ba_frames.append(session.table(fact_generation_name).select(col("ba_code"), col("ba_name")))
+        if table_exists(session, fact_demand_name):
+            ba_frames.append(session.table(fact_demand_name).select(col("ba_code"), col("ba_name")))
+        dim_ba = ba_frames[0]
+        for frame in ba_frames[1:]:
+            dim_ba = dim_ba.union(frame)
+        results["dim_balancing_authority"] = _write_dimension_table(dim_ba.drop_duplicates(["ba_code"]), dim_ba_name)
+
+    if table_exists(session, fact_generation_name):
+        dim_fuel = session.table(fact_generation_name).select(col("fuel_code"), col("fuel_name")).drop_duplicates(["fuel_code"])
+        results["dim_fuel_type"] = _write_dimension_table(dim_fuel, dim_fuel_name)
+    return results
+
+
+def run_gold_partitions(session, *, database: str, target_dates: list[str], scope: str = "all") -> dict[str, dict[str, int]]:
+    gold_tables = get_gold_table_names()
+    results: dict[str, dict[str, int]] = {}
+    for target_date in target_dates:
+        partition_results: dict[str, int] = {}
+        if scope in {"all", "hourly"}:
+            partition_results.update(_build_hourly_generation_partition(session, target_date, database, gold_tables))
+            partition_results.update(_build_hourly_demand_partition(session, target_date, database, gold_tables))
+        if scope in {"all", "monthly"}:
+            partition_results.update(_build_monthly_operational_sales(session, database, target_date, gold_tables))
+        results[target_date] = partition_results
+    return results
 
 
 def run_gold(session, target_date: str, database: str, scope: str = "all") -> dict[str, int]:
-    gold_tables = get_gold_table_names()
-    results: dict[str, int] = {}
-
-    if scope in {"all", "hourly"}:
-        results.update(_build_hourly_gold(session, target_date, database, gold_tables))
-    if scope in {"all", "monthly"}:
-        results["gold_electricity_operational_sales"] = _build_monthly_operational_sales(
-            session, database, target_date, gold_tables
-        )
-    return results
+    results = run_gold_partitions(session, database=database, target_dates=[target_date], scope=scope)
+    refresh_gold_dimensions(session, database=database, scope=scope)
+    return results.get(target_date, {})

@@ -13,11 +13,12 @@ Runtime layout:
 - `pipeline/ingestion`: EIA API client and RAW ingest orchestration
 - `pipeline/silver`: RAW to SILVER transforms
 - `pipeline/gold`: SILVER to GOLD transforms and the gold CLI entrypoint
+- `pipeline/orchestration`: automatic bronze-to-gold partition planning and cadence execution
 
 Airflow runtime:
 
-- `eia_ingest`, `eia_silver`, `eia_gold` for hourly processing
-- `eia_monthly_ingest`, `eia_monthly_silver`, `eia_monthly_gold` for monthly processing
+- `eia_hourly_bronze_to_gold` for fully automatic hourly processing
+- `eia_monthly_bronze_to_gold` for fully automatic monthly processing
 
 Gold shape:
 
@@ -46,6 +47,7 @@ CREATE DATABASE IF NOT EXISTS EIA_PIPELINE;
 CREATE SCHEMA IF NOT EXISTS EIA_PIPELINE.RAW;
 CREATE SCHEMA IF NOT EXISTS EIA_PIPELINE.SILVER;
 CREATE SCHEMA IF NOT EXISTS EIA_PIPELINE.GOLD;
+CREATE SCHEMA IF NOT EXISTS EIA_PIPELINE.META;
 ```
 
 Fill in the Snowflake variables in `.env`.
@@ -75,5 +77,7 @@ Streamlit: `http://localhost:28501`
 - All substantive pipeline logic now lives under `pipeline/`.
 - Snowflake is the source of truth for RAW, SILVER, and GOLD data.
 - dbt remains the planned testing layer on top of Snowflake.
-- Hourly and monthly datasets are processed in separate Airflow DAGs.
+- Bronze-to-gold scheduling is automatic for both hourly and monthly cadence groups.
+- The pipeline automatically bootstraps configured historical data and then keeps recent partitions repaired without manual backfills.
 - SILVER and GOLD partition data by business date derived from the EIA `PERIOD` field rather than ingest date.
+- Pipeline cadence state is stored in `EIA_PIPELINE.META.PIPELINE_RUN_STATE`.

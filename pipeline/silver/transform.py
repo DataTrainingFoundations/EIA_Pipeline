@@ -1,6 +1,19 @@
 from __future__ import annotations
 
-from snowflake.snowpark.functions import col, concat, current_timestamp, lit, to_date, to_timestamp, trim, upper, when
+from snowflake.snowpark import Window
+from snowflake.snowpark.functions import (
+    col,
+    concat,
+    current_timestamp,
+    lit,
+    md5,
+    row_number,
+    to_date,
+    to_timestamp,
+    trim,
+    upper,
+    when,
+)
 
 from pipeline.core.registry import get_raw_table_name, get_silver_table_name
 from pipeline.core.snowflake import table_exists
@@ -11,6 +24,69 @@ DEDUP_COLS = {
     "electricity_demand": ["period", "respondent", "type"],
     "electricity_retail_sales": ["period", "state_id", "sector_abbr"],
     "electricity_power_operational_data": ["period", "state_id", "sector_id", "fuel_type_id"],
+}
+
+OUTPUT_COLS = {
+    "electricity_generation": [
+        "period",
+        "period_ts",
+        "business_date",
+        "respondent",
+        "respondent_name",
+        "fueltype",
+        "fuel_type_name",
+        "units",
+        "value",
+        "value_gwh",
+        "source_fetched_at",
+        "source_ingested_at",
+    ],
+    "electricity_demand": [
+        "period",
+        "period_ts",
+        "business_date",
+        "respondent",
+        "respondent_name",
+        "type",
+        "demand_type_name",
+        "units",
+        "value",
+        "value_gwh",
+        "source_fetched_at",
+        "source_ingested_at",
+    ],
+    "electricity_retail_sales": [
+        "period",
+        "period_ts",
+        "business_date",
+        "state_id",
+        "state_description",
+        "sector_abbr",
+        "sector_name",
+        "customers",
+        "price",
+        "revenue",
+        "sales",
+        "source_fetched_at",
+        "source_ingested_at",
+    ],
+    "electricity_power_operational_data": [
+        "period",
+        "period_ts",
+        "business_date",
+        "state_id",
+        "state_description",
+        "sector_id",
+        "sector_description",
+        "fuel_type_id",
+        "fuel_type_description",
+        "generation",
+        "consumption_for_eg",
+        "ash_content",
+        "heat_content",
+        "source_fetched_at",
+        "source_ingested_at",
+    ],
 }
 
 HOURLY_DATASETS = {"electricity_generation", "electricity_demand"}
@@ -64,9 +140,17 @@ def read_raw_for_business_date(session, dataset: str, table_name: str, target_da
     return raw_df.filter(f"PERIOD = '{target_month}'")
 
 
+def _base_metadata(df):
+    return (
+        df.with_column("source_fetched_at", to_timestamp(col("_FETCHED_AT")))
+        .with_column("source_ingested_at", to_timestamp(col("_INGESTED_AT")))
+    )
+
+
 def clean_generation(df):
     return (
-        df.filter(col("VALUE").is_not_null())
+        _base_metadata(df)
+        .filter(col("VALUE").is_not_null())
         .filter(col("VALUE") >= 0)
         .with_column("RESPONDENT", upper(trim(col("RESPONDENT"))))
         .with_column("FUELTYPE", upper(trim(col("FUELTYPE"))))
@@ -80,24 +164,14 @@ def clean_generation(df):
         .with_column_renamed("FUELTYPE", "fueltype")
         .with_column_renamed("PERIOD", "period")
         .with_column_renamed("VALUE", "value")
-        .select(
-            "period",
-            "period_ts",
-            "business_date",
-            "respondent",
-            "respondent_name",
-            "fueltype",
-            "fuel_type_name",
-            "units",
-            "value",
-            "value_gwh",
-        )
+        .select(*OUTPUT_COLS["electricity_generation"])
     )
 
 
 def clean_demand(df):
     return (
-        df.filter(col("VALUE").is_not_null())
+        _base_metadata(df)
+        .filter(col("VALUE").is_not_null())
         .filter(col("VALUE") >= 0)
         .with_column("RESPONDENT", upper(trim(col("RESPONDENT"))))
         .with_column("TYPE", upper(trim(col("TYPE"))))
@@ -111,24 +185,14 @@ def clean_demand(df):
         .with_column_renamed("TYPE", "type")
         .with_column_renamed("PERIOD", "period")
         .with_column_renamed("VALUE", "value")
-        .select(
-            "period",
-            "period_ts",
-            "business_date",
-            "respondent",
-            "respondent_name",
-            "type",
-            "demand_type_name",
-            "units",
-            "value",
-            "value_gwh",
-        )
+        .select(*OUTPUT_COLS["electricity_demand"])
     )
 
 
 def clean_retail_sales(df):
     return (
-        df.filter(col("PERIOD").is_not_null())
+        _base_metadata(df)
+        .filter(col("PERIOD").is_not_null())
         .filter(col("STATEID").is_not_null())
         .filter(col("SECTORID").is_not_null())
         .with_column("STATEID", upper(trim(col("STATEID"))))
@@ -148,25 +212,14 @@ def clean_retail_sales(df):
         .with_column_renamed("PRICE", "price")
         .with_column_renamed("REVENUE", "revenue")
         .with_column_renamed("SALES", "sales")
-        .select(
-            "period",
-            "period_ts",
-            "business_date",
-            "state_id",
-            "state_description",
-            "sector_abbr",
-            "sector_name",
-            "customers",
-            "price",
-            "revenue",
-            "sales",
-        )
+        .select(*OUTPUT_COLS["electricity_retail_sales"])
     )
 
 
 def clean_power_operational(df):
     return (
-        df.filter(col("PERIOD").is_not_null())
+        _base_metadata(df)
+        .filter(col("PERIOD").is_not_null())
         .filter(col("LOCATION").is_not_null())
         .filter(col("SECTORID").is_not_null())
         .filter(col("FUELTYPEID").is_not_null())
@@ -196,22 +249,35 @@ def clean_power_operational(df):
         .with_column_renamed("CONSUMPTION_FOR_EG", "consumption_for_eg")
         .with_column_renamed("ASH_CONTENT", "ash_content")
         .with_column_renamed("HEAT_CONTENT", "heat_content")
-        .select(
-            "period",
-            "period_ts",
-            "business_date",
-            "state_id",
-            "state_description",
-            "sector_id",
-            "sector_description",
-            "fuel_type_id",
-            "fuel_type_description",
-            "generation",
-            "consumption_for_eg",
-            "ash_content",
-            "heat_content",
+        .select(*OUTPUT_COLS["electricity_power_operational_data"])
+    )
+
+
+def _payload_hash(df, dataset: str):
+    columns = OUTPUT_COLS[dataset]
+    expr = None
+    for index, column_name in enumerate(columns):
+        piece = col(column_name).cast("string")
+        expr = piece if index == 0 else concat(expr, lit("|"), piece)
+    return md5(expr)
+
+
+def _deduplicate(clean_df, dataset: str):
+    business_keys = DEDUP_COLS[dataset]
+    ranked = (
+        clean_df.with_column("payload_hash", _payload_hash(clean_df, dataset))
+        .with_column(
+            "row_rank",
+            row_number().over(
+                Window.partition_by(*[col(column_name) for column_name in business_keys]).order_by(
+                    col("source_ingested_at").desc_nulls_last(),
+                    col("source_fetched_at").desc_nulls_last(),
+                    col("payload_hash").desc_nulls_last(),
+                )
+            ),
         )
     )
+    return ranked.filter(col("row_rank") == lit(1)).drop("payload_hash", "row_rank")
 
 
 def run_silver(session, dataset: str, target_date: str, database: str) -> int:
@@ -226,7 +292,7 @@ def run_silver(session, dataset: str, target_date: str, database: str) -> int:
         "electricity_power_operational_data": clean_power_operational,
     }
     clean_df = clean_map[dataset](raw_df)
-    dedup_df = clean_df.drop_duplicates(DEDUP_COLS[dataset])
+    dedup_df = _deduplicate(clean_df, dataset)
     expected_columns = [column.lower() for column in dedup_df.schema.names]
     return _write_partitioned_table(
         session,
@@ -235,3 +301,39 @@ def run_silver(session, dataset: str, target_date: str, database: str) -> int:
         _normalized_partition_date(dataset, target_date),
         expected_columns,
     )
+
+
+def run_silver_partitions(session, dataset: str, target_dates: list[str], database: str) -> list[dict]:
+    results: list[dict] = []
+    dataset_id = _full_dataset_id(dataset)
+    raw_table = get_raw_table_name(dataset_id)
+    clean_map = {
+        "electricity_generation": clean_generation,
+        "electricity_demand": clean_demand,
+        "electricity_retail_sales": clean_retail_sales,
+        "electricity_power_operational_data": clean_power_operational,
+    }
+    silver_table = f"{database}.SILVER.{get_silver_table_name(dataset_id)}"
+    for target_date in target_dates:
+        raw_df = read_raw_for_business_date(session, dataset, raw_table, target_date)
+        raw_count = raw_df.count()
+        clean_df = clean_map[dataset](raw_df)
+        dedup_df = _deduplicate(clean_df, dataset)
+        dedup_count = dedup_df.count()
+        expected_columns = [column.lower() for column in dedup_df.schema.names]
+        written = _write_partitioned_table(
+            session,
+            dedup_df,
+            silver_table,
+            _normalized_partition_date(dataset, target_date),
+            expected_columns,
+        )
+        results.append(
+            {
+                "partition_date": _normalized_partition_date(dataset, target_date),
+                "rows_read": raw_count,
+                "rows_written": written,
+                "duplicates_removed": max(raw_count - dedup_count, 0),
+            }
+        )
+    return results

@@ -4,9 +4,14 @@ datasets:
     snowflake_table: ELECTRICITY_GENERATION_RAW
     eia_route: "electricity/rto/fuel-type-data"
     frequency: "hourly"
+    cadence_group: "hourly"
     transform_enabled: true
+    bootstrap_enabled: true
+    bootstrap_start_date: "2025-01-01"
     scheduled_ingest: true
     scheduled_transform: true
+    repair_lookback_partitions: 7
+    max_partitions_per_run: 14
     rolling_days: 7
     chunk_days: 7
     params:
@@ -39,9 +44,14 @@ datasets:
     snowflake_table: ELECTRICITY_DEMAND_RAW
     eia_route: "electricity/rto/region-data"
     frequency: "hourly"
+    cadence_group: "hourly"
     transform_enabled: true
+    bootstrap_enabled: true
+    bootstrap_start_date: "2025-01-01"
     scheduled_ingest: true
     scheduled_transform: true
+    repair_lookback_partitions: 7
+    max_partitions_per_run: 14
     rolling_days: 7
     chunk_days: 7
     params:
@@ -70,9 +80,14 @@ datasets:
     snowflake_table: ELECTRICITY_RETAIL_SALES_RAW
     eia_route: "electricity/retail-sales/data"
     frequency: "monthly"
+    cadence_group: "monthly"
     transform_enabled: true
-    scheduled_ingest: false
-    scheduled_transform: false
+    bootstrap_enabled: true
+    bootstrap_start_date: "2023-01-01"
+    scheduled_ingest: true
+    scheduled_transform: true
+    repair_lookback_partitions: 3
+    max_partitions_per_run: 12
     rolling_months: 24
     chunk_months: 12
     params:
@@ -103,9 +118,14 @@ datasets:
     snowflake_table: ELECTRICITY_POWER_OPERATIONAL_RAW
     eia_route: "electricity/electric-power-operational-data"
     frequency: "monthly"
+    cadence_group: "monthly"
     transform_enabled: true
-    scheduled_ingest: false
-    scheduled_transform: false
+    bootstrap_enabled: true
+    bootstrap_start_date: "2023-01-01"
+    scheduled_ingest: true
+    scheduled_transform: true
+    repair_lookback_partitions: 3
+    max_partitions_per_run: 12
     rolling_months: 24
     chunk_months: 12
     facet_chunk_key: location

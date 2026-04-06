@@ -27,6 +27,31 @@ def month_anchor_date(value: str) -> str:
     return parsed.replace(day=1).isoformat()
 
 
+def shift_partition(value: str, frequency: str, step: int) -> str:
+    parsed = datetime.strptime(value, "%Y-%m-%d")
+    if frequency == "monthly":
+        return _shift_months(_month_floor(parsed), step).date().isoformat()
+    return (parsed + timedelta(days=step)).date().isoformat()
+
+
+def enumerate_partitions(start_date: str, end_date: str, *, frequency: str) -> list[str]:
+    start = month_anchor_date(start_date) if frequency == "monthly" else start_date
+    end = month_anchor_date(end_date) if frequency == "monthly" else end_date
+    partitions: list[str] = []
+    current = start
+    while current <= end:
+        partitions.append(current)
+        current = shift_partition(current, frequency, 1)
+    return partitions
+
+
+def current_partition_date(frequency: str) -> str:
+    now = datetime.now(timezone.utc)
+    if frequency == "monthly":
+        return _month_floor(now).date().isoformat()
+    return now.date().isoformat()
+
+
 def _month_floor(dt: datetime) -> datetime:
     return dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 

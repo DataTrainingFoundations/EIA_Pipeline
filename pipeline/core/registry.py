@@ -38,6 +38,10 @@ def iter_transform_datasets() -> list[dict]:
     return [dataset for dataset in load_registry() if dataset.get("transform_enabled", False)]
 
 
+def iter_cadence_datasets(cadence_group: str) -> list[dict]:
+    return [dataset for dataset in load_registry() if dataset.get("cadence_group", dataset.get("frequency")) == cadence_group]
+
+
 def iter_scheduled_ingest_datasets() -> list[dict]:
     return [dataset for dataset in load_registry() if dataset.get("scheduled_ingest", dataset.get("frequency") == "hourly")]
 
@@ -48,6 +52,15 @@ def iter_scheduled_transform_datasets() -> list[dict]:
         for dataset in load_registry()
         if dataset.get("transform_enabled", False)
         and dataset.get("scheduled_transform", dataset.get("frequency") == "hourly")
+    ]
+
+
+def iter_scheduled_cadence_datasets(cadence_group: str) -> list[dict]:
+    return [
+        dataset
+        for dataset in iter_cadence_datasets(cadence_group)
+        if dataset.get("scheduled_ingest", dataset.get("frequency") == "hourly")
+        and dataset.get("scheduled_transform", dataset.get("transform_enabled", False))
     ]
 
 

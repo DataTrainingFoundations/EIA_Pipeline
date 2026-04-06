@@ -22,13 +22,23 @@ _SNOWFLAKE_ENV_KEYS = [
 ]
 
 
+def _conf_str(conf: dict, key: str, default: str = "") -> str:
+    value = conf.get(key, default)
+    if value is None:
+        return ""
+    normalized = str(value).strip()
+    if normalized.lower() == "none":
+        return ""
+    return normalized
+
+
 def _ingest_dataset(dataset_id: str, **context) -> None:
     conf = context["dag_run"].conf or {}
     env = {
         **os.environ,
         "TARGET_DATASET_ID": dataset_id,
-        "BACKFILL_START_DATE": conf.get("start_date", "").strip(),
-        "BACKFILL_END_DATE": conf.get("end_date", "").strip(),
+        "BACKFILL_START_DATE": _conf_str(conf, "start_date"),
+        "BACKFILL_END_DATE": _conf_str(conf, "end_date"),
         "ROLLING_HOURS": "",
         **{key: os.environ.get(key, "") for key in _SNOWFLAKE_ENV_KEYS},
     }

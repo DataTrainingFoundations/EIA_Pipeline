@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 
 
-def _normalize_optional_value(value: str) -> str:
-    normalized = value.strip()
+def _normalize_optional_value(value: str | None) -> str:
+    normalized = str(value or "").strip()
     if normalized.lower() == "none":
         return ""
     return normalized
@@ -100,7 +100,7 @@ def resolve_ingest_windows(
 
 def resolve_processing_date(conf: dict | None, default_ds: str) -> str:
     conf = conf or {}
-    return (conf.get("date") or default_ds).strip()
+    return _normalize_optional_value(conf.get("date") or default_ds)
 
 
 def resolve_business_date(conf: dict | None, default_ds: str, *, frequency: str) -> str:

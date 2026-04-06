@@ -1,29 +1,28 @@
 """
 gold_electricity_operational_sales.py
 ======================================
-Reads from EIA_DB.SILVER silver tables and writes gold dimension and fact
-tables to EIA_DB.GOLD.
+Reads from EIA_DB.SILVER and writes gold dimension and fact tables
+to EIA_DB.GOLD, including fossil vs renewable fuel mix percentages.
 
-Silver columns used:
-    SILVER_ELECTRICITY_POWER_OPERATIONAL_DATA:
-        period, state_id, sector_id, fuel_type_id, state_description,
-        sector_description, fuel_type_description, generation, generation_units,
-        consumption_for_eg, ash_content, heat_content, period_ts
-
-    SILVER_ELECTRICITY_RETAIL_SALES:
-        period, state_id, sector_abbr, state_description, sector_name,
-        customers, price, revenue, sales, period_ts
+Fuel type mapping:
+    Fossil    → NG  (natural gas)
+    Renewable → SUN (solar) + WND (wind)
 """
 
 import os
 from snowflake.snowpark import Session
 from snowflake.snowpark.functions import (
-    col, year, month, substr, round as sf_round,
-    current_timestamp, sum as sf_sum, when
+    col, year, month, current_timestamp,
+    sum as sf_sum, when, round as sf_round
 )
 
+VALID_STATES = [
+    "AK","AL","AR","AZ","CA","CO","CT","DC","DE","FL","GA","HI","IA","ID",
+    "IL","IN","KS","KY","LA","MA","MD","ME","MI","MN","MO","MS","MT","NC",
+    "ND","NE","NH","NJ","NM","NV","NY","OH","OK","OR","PA","RI","SC","SD",
+    "TN","TX","UT","VA","VT","WA","WI","WV","WY"
+]
 
-# ── 1. Connect ────────────────────────────────────────────
 def _get_session() -> Session:
     return Session.builder.configs({
         "account":   os.getenv("SNOWFLAKE_ACCOUNT"),
@@ -36,44 +35,30 @@ def _get_session() -> Session:
     }).create()
 
 
-# ── 2. Load silver tables ─────────────────────────────────
 def load_silver_tables(session):
     ops_df   = session.table("EIA_DB.SILVER.SILVER_ELECTRICITY_POWER_OPERATIONAL_DATA")
     sales_df = session.table("EIA_DB.SILVER.SILVER_ELECTRICITY_RETAIL_SALES")
     return ops_df, sales_df
 
 
-# ── 3a. Dimension tables ──────────────────────────────────
 def create_dim_tables(session, ops_df, sales_df):
-
-    # DIM_LOCATION — from sales (has state_description + state_id)
-    dim_location = (
-        sales_df
-        .select(col("state_id"), col("state_description"))
-        .distinct()
-    )
+    dim_location = sales_df.select(col("state_id"), col("state_description")).distinct()
     dim_location.write.mode("overwrite").save_as_table("EIA_DB.GOLD.DIM_LOCATION")
     print("✓ DIM_LOCATION")
 
-    # DIM_SECTOR — from sales (has sector_abbr + sector_name)
-    dim_sector = (
-        sales_df
-        .select(col("sector_abbr"), col("sector_name"))
-        .distinct()
-    )
+    dim_sector = sales_df.select(col("sector_abbr"), col("sector_name")).distinct()
     dim_sector.write.mode("overwrite").save_as_table("EIA_DB.GOLD.DIM_SECTOR")
     print("✓ DIM_SECTOR")
 
-    # DIM_FUEL_TYPE — from ops
     dim_fuel = (
         ops_df
+        .filter(col("fuel_type_id").isin(["NG", "SUN", "WND"]))
         .select(col("fuel_type_id"), col("fuel_type_description"))
         .distinct()
     )
-    dim_fuel.write.mode("overwrite").save_as_table("EIA_DB.GOLD.DIM_FUEL_TYPE")
-    print("✓ DIM_FUEL_TYPE")
+    dim_fuel.write.mode("overwrite").save_as_table("EIA_DB.GOLD.DIM_FUEL_TYPE_MONTHLY")
+    print("✓ DIM_FUEL_TYPE_MONTHLY")
 
-    # DIM_TIME — from ops period (YYYY-MM)
     dim_time = (
         ops_df
         .select(
@@ -88,45 +73,80 @@ def create_dim_tables(session, ops_df, sales_df):
     print("✓ DIM_TIME")
 
 
-# ── 3b. Fact table ────────────────────────────────────────
 def create_fact_table(session, ops_df, sales_df):
-    """
-    Join ops and sales on period + state_id.
-    Note: ops uses sector_id (int), sales uses sector_abbr (text).
-    We join on period + state_id only and carry both sector keys.
-    """
 
-    # Aggregate ops to period + state_id level (sum across fuel types)
-    ops_agg = (
-        ops_df
-        .group_by("period", "state_id", "sector_id", "state_description", "sector_description")
+    # ── Aggregate sales to period + state level first ─────────────────────
+    sales_agg = (
+        sales_df
+        .filter(col("sector_abbr") != "ALL").filter(col("state_id").isin(VALID_STATES))
+        .group_by("period", "state_id", "state_description", "sector_abbr", "sector_name")
         .agg(
-            sf_sum(col("generation").cast("float")).alias("total_generation"),
-            sf_sum(col("consumption_for_eg").cast("float")).alias("total_consumption"),
+            sf_sum(col("sales").cast("float")).alias("retail_sales_mwh"),
+            sf_sum(col("revenue").cast("float")).alias("revenue"),
+            sf_sum(col("customers").cast("float")).alias("customers"),
+            when(sf_sum(col("sales").cast("float")) > 0,
+                sf_sum(col("price").cast("float") * col("sales").cast("float")) /
+                sf_sum(col("sales").cast("float"))
+            ).otherwise(None).alias("avg_price"),
         )
     )
 
-    # Join to sales on period + state_id
-    fact = (
-        ops_agg.join(
-            sales_df,
-            on=["period", "state_id"],
-            how="inner",
+    # ── Total generation per period + state ───────────────────────────────
+    total_gen = (
+        ops_df
+        .group_by("period", "state_id")
+        .agg(sf_sum(col("generation").cast("float")).alias("total_gen"))
+    )
+
+    # ── Fossil and renewable generation per period + state ────────────────
+    fuel_agg = (
+        ops_df
+        .with_column(
+            "fossil_gen",
+            when(col("fuel_type_id") == "NG", col("generation").cast("float")).otherwise(0)
         )
+        .with_column(
+            "renewable_gen",
+            when(col("fuel_type_id").isin(["SUN", "WND"]), col("generation").cast("float")).otherwise(0)
+        )
+        .group_by("period", "state_id")
+        .agg(
+            sf_sum(col("fossil_gen")).alias("fossil_gen"),
+            sf_sum(col("renewable_gen")).alias("renewable_gen"),
+        )
+    )
+
+    # ── Compute fuel mix percentages ──────────────────────────────────────
+    fuel_mix = (
+        fuel_agg
+        .join(total_gen, on=["period", "state_id"], how="inner")
+        .filter(col("total_gen") > 0)
         .select(
             col("period"),
-            col("period_ts"),
             col("state_id"),
-            ops_agg["state_description"],
-            col("sector_id"),
+            sf_round((col("fossil_gen")    / col("total_gen") * 100), 2).alias("fossil_pct"),
+            sf_round((col("renewable_gen") / col("total_gen") * 100), 2).alias("renewable_pct"),
+            col("total_gen"),
+        )
+    )
+
+    # ── Join sales + fuel mix ─────────────────────────────────────────────
+    fact = (
+        sales_agg
+        .join(fuel_mix, on=["period", "state_id"], how="left")
+        .select(
+            col("period"),
+            col("state_id"),
+            sales_agg["state_description"],
             col("sector_abbr"),
             col("sector_name"),
-            col("total_generation"),
-            col("total_consumption"),
-            col("sales").cast("float").alias("retail_sales_mwh"),
-            col("revenue").cast("float").alias("revenue"),
-            col("price").cast("float").alias("avg_price"),
-            col("customers").cast("float").alias("customers"),
+            col("retail_sales_mwh"),
+            col("revenue"),
+            col("avg_price"),
+            col("customers"),
+            col("total_gen"),
+            col("fossil_pct"),
+            col("renewable_pct"),
             current_timestamp().alias("gold_processed_at"),
         )
     )
@@ -135,7 +155,6 @@ def create_fact_table(session, ops_df, sales_df):
     print("✓ FACT_ELECTRICITY_OPERATIONAL_SALES")
 
 
-# ── 4. Main ───────────────────────────────────────────────
 def run_gold_pipeline():
     session = _get_session()
     try:

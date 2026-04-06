@@ -9,6 +9,7 @@ from data_access_sales import load_sales_coverage
 
 from data_access_operational_sales import (
     load_sales_gold,
+    load_gold_coverage,
     gold_table_has_rows,
 )
 
@@ -43,7 +44,7 @@ df["YEAR_MONTH"] = df["PERIOD"].dt.strftime("%Y-%m")
 with st.sidebar:
     st.header("Filters")
 
-    coverage = load_sales_coverage()  # unchanged
+    coverage = load_gold_coverage()
     min_date = coverage["min_period"].to_pydatetime()
     max_date = coverage["max_period"].to_pydatetime()
 
@@ -289,7 +290,7 @@ st.plotly_chart(fig_share, use_container_width=True)
 st.subheader("Fuel Mix vs Retail Price by State")
 st.caption("Each point is one state in one month. X-axis is the share of electricity generated from fossil fuels (gas + coal). Y-axis is the average retail price consumers pay.")
 
-jdf = fdf.dropna(subset=["FOSSIL_PCT","AVG_PRICE","RENEWABLE_PCT"])  # Gold already joined
+jdf = fdf.dropna(subset=["FOSSIL_PCT","PRICE","RENEWABLE_PCT"])  # Gold already joined
 if jdf.empty:
     st.info("No overlapping fuel mix data for this date range.")
 else:
@@ -314,9 +315,9 @@ else:
 
 st.subheader("Renewable Penetration vs Retail Price Over Time")
 st.caption("Lines show how each renewable quartile's average retail price evolves.")
-state_avg_renewable = jdf.groupby("LOCATION")["RENEWABLE_PCT"].mean().reset_index().rename(columns={"RENEWABLE_PCT":"AVG_RENEWABLE_PCT"})
+state_avg_renewable = jdf.groupby("STATEDESCRIPTION")["RENEWABLE_PCT"].mean().reset_index().rename(columns={"RENEWABLE_PCT":"AVG_RENEWABLE_PCT"})
 state_avg_renewable["QUARTILE"] = pd.qcut(state_avg_renewable["AVG_RENEWABLE_PCT"], q=4, labels=["Q1 Low renewable","Q2","Q3","Q4 High renewable"])
-jdf_q = jdf.merge(state_avg_renewable[["LOCATION","QUARTILE"]], on="LOCATION", how="left")
+jdf_q = jdf.merge(state_avg_renewable[["STATEDESCRIPTION","QUARTILE"]], on="STATEDESCRIPTION", how="left")
 quartile_trend = jdf_q.groupby(["PERIOD","QUARTILE"])["PRICE"].mean().reset_index().sort_values("PERIOD")
 
 fig_quartile = px.line(

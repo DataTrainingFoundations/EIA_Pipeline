@@ -64,6 +64,13 @@ DEDUP_COLS = {
     "electricity_power_operational_data": ["PERIOD", "STATE_ID", "SECTOR_ID", "FUEL_TYPE_ID"],
     "electricity_retail_sales": ["PERIOD", "STATE_ID", "SECTOR_ABBR"],
 }
+#Run Types For Hourly vs Monthly Datasets
+WRITE_MODE = {
+    "electricity_generation":              "append",
+    "electricity_demand":                  "append",
+    "electricity_power_operational_data":  "overwrite",
+    "electricity_retail_sales":            "overwrite",
+}
 
 
 def _build_snowpark():
@@ -323,8 +330,9 @@ def run(dataset: str, date: str) -> None:
     #     .save(silver_path)
     # )
 
+    write_mode = WRITE_MODE[dataset]
     (
-        silver_df.write.mode("append").save_as_table(f"{SF_DB}.SILVER.{silver_table}")
+        silver_df.write.mode(write_mode).save_as_table(f"{SF_DB}.SILVER.{silver_table}")
     )
 
     logger.info("Silver write complete -> %s", silver_table)

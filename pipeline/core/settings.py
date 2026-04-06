@@ -24,6 +24,17 @@ class EiaSettings:
     retry_backoff_seconds: int = 2
 
 
+def _read_optional_float(env_name: str, default: float) -> float:
+    raw_value = os.environ.get(env_name)
+    if raw_value is None:
+        return default
+
+    normalized = raw_value.strip()
+    if not normalized or normalized.lower() == "none":
+        return default
+    return float(normalized)
+
+
 def load_snowflake_settings(*, schema: str | None = None) -> SnowflakeSettings:
     return SnowflakeSettings(
         account=os.environ["SNOWFLAKE_ACCOUNT"],
@@ -43,5 +54,5 @@ def load_app_snowflake_settings() -> SnowflakeSettings:
 def load_eia_settings() -> EiaSettings:
     return EiaSettings(
         api_key=os.environ["EIA_API_KEY"],
-        default_rolling_hours=float(os.environ.get("ROLLING_HOURS", "2")),
+        default_rolling_hours=_read_optional_float("ROLLING_HOURS", 2.0),
     )

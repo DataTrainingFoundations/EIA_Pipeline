@@ -79,10 +79,10 @@ def get_monthly_sales_coverage() -> dict[str, Any]:
         min(period) as min_period,
         max(period) as max_period,
         count(*) as row_count,
-        count(distinct stateid) as state_count,
-        count(distinct sectorid) as sector_count
+        count(distinct state_id) as state_count,
+        count(distinct sector_abbr) as sector_count
     from {MONTHLY_SALES_TABLE}
-    where sectorid != 'ALL'
+    where sector_abbr != 'ALL'
     """
     return _safe_read_sql(query).iloc[0].to_dict()
 

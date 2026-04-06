@@ -113,7 +113,6 @@ if sales_df.empty:
 
 sales_df["year"] = sales_df["period"].dt.year
 sales_df["month"] = sales_df["period"].dt.month
-tick_fmt = METRIC_TICK_FORMAT[metric]
 
 st.markdown(
     f"Using **{data_path}** monthly sales path. "
@@ -322,7 +321,7 @@ else:
     overlay_left.plotly_chart(scatter_fig, use_container_width=True)
 
     quartile_source = joined_df.dropna(subset=["renewable_pct", scatter_y]).copy()
-    quartile_source["state_key"] = quartile_source["stateid"] if "stateid" in quartile_source.columns else quartile_source["location"]
+    quartile_source["state_key"] = quartile_source["state_id"]
     state_avg = quartile_source.groupby("state_key", as_index=False).agg(avg_renewable_pct=("renewable_pct", "mean"))
     if len(state_avg) < 4:
         overlay_right.info("Renewable quartile trend needs at least four states with overlapping fuel-mix data.")

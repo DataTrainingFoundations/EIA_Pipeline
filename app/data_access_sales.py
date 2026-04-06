@@ -35,16 +35,16 @@ def load_sales_data(
     query = f"""
     select
         period,
-        stateid,
+        state_id,
         state_description,
-        sectorid,
+        sector_abbr,
         sector_name,
         customers,
         price,
         revenue,
         sales
     from {SALES_TABLE}
-    where sectorid != 'ALL'
+    where sector_abbr != 'ALL'
     """
     if start_date:
         query += f" and period >= {sql_literal(start_date)}"
@@ -53,8 +53,8 @@ def load_sales_data(
     if sectors:
         query += f" and sector_name in ({sql_in_list(sectors)})"
     if states:
-        query += f" and stateid in ({sql_in_list(states)})"
-    query += " order by period, stateid, sector_name"
+        query += f" and state_id in ({sql_in_list(states)})"
+    query += " order by period, state_id, sector_name"
     return _coerce_sales_frame(_safe_read_sql(query))
 
 
@@ -65,10 +65,10 @@ def load_sales_coverage() -> dict[str, Any]:
         min(period) as min_period,
         max(period) as max_period,
         count(*) as row_count,
-        count(distinct stateid) as state_count,
-        count(distinct sectorid) as sector_count
+        count(distinct state_id) as state_count,
+        count(distinct sector_abbr) as sector_count
     from {SALES_TABLE}
-    where sectorid != 'ALL'
+    where sector_abbr != 'ALL'
     """
     row = _safe_read_sql(query).iloc[0].to_dict()
     if row.get("min_period") is not None:
@@ -80,14 +80,14 @@ def load_sales_coverage() -> dict[str, Any]:
 
 @st.cache_data(ttl=300)
 def list_sales_states() -> list[str]:
-    query = f"select distinct stateid from {SALES_TABLE} where sectorid != 'ALL' order by stateid"
+    query = f"select distinct state_id from {SALES_TABLE} where sector_abbr != 'ALL' order by state_id"
     df = _safe_read_sql(query)
-    return df["stateid"].dropna().tolist()
+    return df["state_id"].dropna().tolist()
 
 
 @st.cache_data(ttl=300)
 def list_sales_sectors() -> list[str]:
-    query = f"select distinct sector_name from {SALES_TABLE} where sectorid != 'ALL' order by sector_name"
+    query = f"select distinct sector_name from {SALES_TABLE} where sector_abbr != 'ALL' order by sector_name"
     df = _safe_read_sql(query)
     return df["sector_name"].dropna().tolist()
 

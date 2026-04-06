@@ -51,6 +51,18 @@ def iter_scheduled_transform_datasets() -> list[dict]:
     ]
 
 
+def iter_monthly_ingest_datasets() -> list[dict]:
+    return [dataset for dataset in load_registry() if dataset.get("frequency") == "monthly"]
+
+
+def iter_monthly_transform_datasets() -> list[dict]:
+    return [
+        dataset
+        for dataset in load_registry()
+        if dataset.get("frequency") == "monthly" and dataset.get("transform_enabled", False)
+    ]
+
+
 def get_dataset(dataset_id: str) -> dict:
     for dataset in load_registry():
         if dataset["id"] == dataset_id:

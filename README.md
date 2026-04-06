@@ -14,6 +14,11 @@ Runtime layout:
 - `pipeline/silver`: RAW to SILVER transforms
 - `pipeline/gold`: SILVER to GOLD transforms and the gold CLI entrypoint
 
+Airflow runtime:
+
+- `eia_ingest`, `eia_silver`, `eia_gold` for hourly processing
+- `eia_monthly_ingest`, `eia_monthly_silver`, `eia_monthly_gold` for monthly processing
+
 Gold shape:
 
 - `FACT_GENERATION_HOURLY`
@@ -70,4 +75,5 @@ Streamlit: `http://localhost:28501`
 - All substantive pipeline logic now lives under `pipeline/`.
 - Snowflake is the source of truth for RAW, SILVER, and GOLD data.
 - dbt remains the planned testing layer on top of Snowflake.
-- Monthly retail sales and operational datasets are supported, but they are not part of the default hourly Airflow loop.
+- Hourly and monthly datasets are processed in separate Airflow DAGs.
+- SILVER and GOLD partition data by business date derived from the EIA `PERIOD` field rather than ingest date.

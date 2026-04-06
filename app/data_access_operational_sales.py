@@ -37,8 +37,8 @@ def load_sales_gold(
     if sectors:
         query += f" and sector_name in ({sql_in_list(sectors)})"
     if states:
-        query += f" and stateid in ({sql_in_list(states)})"
-    query += " order by period, stateid, sector_name"
+        query += f" and state_id in ({sql_in_list(states)})"
+    query += " order by period, state_id, sector_name"
     return _coerce_gold_frame(_safe_read_sql(query))
 
 

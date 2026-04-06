@@ -72,6 +72,7 @@ def ingest_dataset(
                 session,
                 dataset["snowflake_table"],
                 enrich_records(records, dataset["id"]),
+                dataset.get("schema", {}),
             )
     return total_written
 

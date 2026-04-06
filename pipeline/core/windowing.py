@@ -3,6 +3,13 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 
 
+def _normalize_optional_value(value: str) -> str:
+    normalized = value.strip()
+    if normalized.lower() == "none":
+        return ""
+    return normalized
+
+
 def _fmt_hour(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H")
 
@@ -13,6 +20,11 @@ def _fmt_month(dt: datetime) -> str:
 
 def _parse_date(value: str) -> date:
     return datetime.strptime(value, "%Y-%m-%d").date()
+
+
+def month_anchor_date(value: str) -> str:
+    parsed = _parse_date(value)
+    return parsed.replace(day=1).isoformat()
 
 
 def _month_floor(dt: datetime) -> datetime:
@@ -60,6 +72,9 @@ def resolve_ingest_windows(
     rolling_hours: str = "",
     default_rolling_hours: float = 2.0,
 ) -> list[tuple[str, str]]:
+    start_date = _normalize_optional_value(start_date)
+    end_date = _normalize_optional_value(end_date)
+    rolling_hours = _normalize_optional_value(rolling_hours)
     frequency = dataset.get("frequency", "hourly")
     if start_date and end_date:
         if frequency == "monthly":
@@ -86,3 +101,10 @@ def resolve_ingest_windows(
 def resolve_processing_date(conf: dict | None, default_ds: str) -> str:
     conf = conf or {}
     return (conf.get("date") or default_ds).strip()
+
+
+def resolve_business_date(conf: dict | None, default_ds: str, *, frequency: str) -> str:
+    target_date = resolve_processing_date(conf, default_ds)
+    if frequency == "monthly":
+        return month_anchor_date(target_date)
+    return target_date

@@ -34,10 +34,10 @@ def load_operational_data(
     query = f"""
     select
         period,
-        location,
+        state_id,
         state_description,
-        sectorid,
-        fueltypeid,
+        sector_id,
+        fuel_type_id,
         generation
     from {OPERATIONAL_TABLE}
     where generation is not null
@@ -47,8 +47,8 @@ def load_operational_data(
     if end_date:
         query += f" and period <= {sql_literal(end_date)}"
     if states:
-        query += f" and location in ({sql_in_list(states)})"
-    query += " order by period, location, fueltypeid"
+        query += f" and state_id in ({sql_in_list(states)})"
+    query += " order by period, state_id, fuel_type_id"
     return _coerce_operational_frame(_safe_read_sql(query))
 
 
@@ -62,27 +62,27 @@ def load_fuel_mix_by_state(
     if df.empty:
         return df
     grouped = (
-        df.groupby(["period", "location", "state_description"], as_index=False)
+        df.groupby(["period", "state_id", "state_description"], as_index=False)
         .agg(total_generation=("generation", "sum"))
     )
     fossil = (
-        df[df["fueltypeid"].isin(FOSSIL_FUELS)]
-        .groupby(["period", "location"], as_index=False)
+        df[df["fuel_type_id"].isin(FOSSIL_FUELS)]
+        .groupby(["period", "state_id"], as_index=False)
         .agg(fossil_generation=("generation", "sum"))
     )
     renewable = (
-        df[df["fueltypeid"].isin(RENEWABLE_FUELS)]
-        .groupby(["period", "location"], as_index=False)
+        df[df["fuel_type_id"].isin(RENEWABLE_FUELS)]
+        .groupby(["period", "state_id"], as_index=False)
         .agg(renewable_generation=("generation", "sum"))
     )
     nuclear = (
-        df[df["fueltypeid"].isin(NUCLEAR_FUELS)]
-        .groupby(["period", "location"], as_index=False)
+        df[df["fuel_type_id"].isin(NUCLEAR_FUELS)]
+        .groupby(["period", "state_id"], as_index=False)
         .agg(nuclear_generation=("generation", "sum"))
     )
-    grouped = grouped.merge(fossil, on=["period", "location"], how="left")
-    grouped = grouped.merge(renewable, on=["period", "location"], how="left")
-    grouped = grouped.merge(nuclear, on=["period", "location"], how="left")
+    grouped = grouped.merge(fossil, on=["period", "state_id"], how="left")
+    grouped = grouped.merge(renewable, on=["period", "state_id"], how="left")
+    grouped = grouped.merge(nuclear, on=["period", "state_id"], how="left")
     grouped[["fossil_generation", "renewable_generation", "nuclear_generation"]] = grouped[
         ["fossil_generation", "renewable_generation", "nuclear_generation"]
     ].fillna(0.0)
@@ -104,13 +104,12 @@ def load_fuel_mix_price_joined(
         return pd.DataFrame()
 
     sales_prices = (
-        sales_df.groupby(["period", "stateid", "state_description"], as_index=False)
+        sales_df.groupby(["period", "state_id", "state_description"], as_index=False)
         .agg(avg_price=("price", "mean"))
     )
     return mix_df.merge(
         sales_prices,
-        left_on=["period", "location", "state_description"],
-        right_on=["period", "stateid", "state_description"],
+        on=["period", "state_id", "state_description"],
         how="inner",
     )
 

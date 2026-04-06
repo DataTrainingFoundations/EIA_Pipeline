@@ -7,19 +7,19 @@ from airflow.operators.python import PythonOperator
 from airflow.sensors.python import PythonSensor
 from airflow.utils.dates import days_ago
 
-from pipeline.core.registry import get_silver_table_name, iter_scheduled_transform_datasets
+from pipeline.core.registry import get_silver_table_name, iter_monthly_transform_datasets
 from pipeline.core.settings import load_snowflake_settings
 from pipeline.core.snowflake import close_session, get_snowpark_session, table_has_rows_for_partition_date
 from pipeline.core.windowing import resolve_business_date
 from pipeline.gold.transform import run_gold
 
 
-def _all_silver_ready(**context) -> bool:
-    target_date = resolve_business_date(context["dag_run"].conf, context["ds"], frequency="hourly")
+def _all_monthly_silver_ready(**context) -> bool:
+    target_date = resolve_business_date(context["dag_run"].conf, context["ds"], frequency="monthly")
     settings = load_snowflake_settings(schema="SILVER")
     session = get_snowpark_session(settings)
     try:
-        for dataset in iter_scheduled_transform_datasets():
+        for dataset in iter_monthly_transform_datasets():
             silver_table = f"{settings.database}.SILVER.{get_silver_table_name(dataset['id'])}"
             if not table_has_rows_for_partition_date(session, silver_table, target_date):
                 return False
@@ -29,11 +29,11 @@ def _all_silver_ready(**context) -> bool:
 
 
 def _run_gold(**context) -> None:
-    target_date = resolve_business_date(context["dag_run"].conf, context["ds"], frequency="hourly")
+    target_date = resolve_business_date(context["dag_run"].conf, context["ds"], frequency="monthly")
     settings = load_snowflake_settings(schema="GOLD")
     session = get_snowpark_session(settings)
     try:
-        run_gold(session, target_date, settings.database, scope="hourly")
+        run_gold(session, target_date, settings.database, scope="monthly")
     finally:
         close_session(session)
 
@@ -47,25 +47,26 @@ default_args = {
 }
 
 with DAG(
-    dag_id="eia_gold",
-    description="Sense Snowflake SILVER tables and build Snowflake GOLD tables.",
-    schedule_interval="45 * * * *",
+    dag_id="eia_monthly_gold",
+    description="Sense monthly Snowflake SILVER tables and build monthly Snowflake GOLD marts.",
+    schedule_interval="0 7 1 * *",
     start_date=days_ago(1),
     catchup=False,
+    is_paused_upon_creation=False,
     default_args=default_args,
-    tags=["eia", "gold", "snowflake"],
+    tags=["eia", "monthly", "gold", "snowflake"],
     max_active_runs=1,
     params={"date": ""},
 ) as dag:
     sense = PythonSensor(
-        task_id="sense_all_silver_tables",
-        python_callable=_all_silver_ready,
+        task_id="sense_all_monthly_silver_tables",
+        python_callable=_all_monthly_silver_ready,
         poke_interval=60,
         timeout=7200,
         mode="reschedule",
     )
     build = PythonOperator(
-        task_id="build_gold_tables",
+        task_id="build_monthly_gold_tables",
         python_callable=_run_gold,
     )
     sense >> build

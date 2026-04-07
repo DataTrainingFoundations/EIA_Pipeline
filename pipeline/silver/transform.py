@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from snowflake.snowpark import Window
 from snowflake.snowpark.functions import (
     col,
@@ -18,6 +20,8 @@ from snowflake.snowpark.functions import (
 from pipeline.core.registry import get_raw_table_name, get_silver_table_name
 from pipeline.core.snowflake import table_exists
 from pipeline.core.windowing import month_anchor_date
+
+logger = logging.getLogger(__name__)
 
 DEDUP_COLS = {
     "electricity_generation": ["period", "respondent", "fueltype"],
@@ -315,6 +319,7 @@ def run_silver_partitions(session, dataset: str, target_dates: list[str], databa
     }
     silver_table = f"{database}.SILVER.{get_silver_table_name(dataset_id)}"
     for target_date in target_dates:
+        logger.info("Building silver dataset=%s target_date=%s", dataset, target_date)
         raw_df = read_raw_for_business_date(session, dataset, raw_table, target_date)
         raw_count = raw_df.count()
         clean_df = clean_map[dataset](raw_df)
@@ -335,5 +340,13 @@ def run_silver_partitions(session, dataset: str, target_dates: list[str], databa
                 "rows_written": written,
                 "duplicates_removed": max(raw_count - dedup_count, 0),
             }
+        )
+        logger.info(
+            "Built silver dataset=%s target_date=%s rows_read=%s rows_written=%s duplicates_removed=%s",
+            dataset,
+            target_date,
+            raw_count,
+            written,
+            max(raw_count - dedup_count, 0),
         )
     return results

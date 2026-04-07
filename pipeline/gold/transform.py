@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from snowflake.snowpark.functions import (
     col,
     concat,
@@ -15,6 +17,8 @@ from snowflake.snowpark.functions import (
 from pipeline.core.registry import get_gold_table_names
 from pipeline.core.snowflake import table_exists
 from pipeline.core.windowing import month_anchor_date
+
+logger = logging.getLogger(__name__)
 
 GEN_STABLE_COLS = [
     "period",
@@ -331,6 +335,7 @@ def run_gold_partitions(session, *, database: str, target_dates: list[str], scop
     gold_tables = get_gold_table_names()
     results: dict[str, dict[str, int]] = {}
     for target_date in target_dates:
+        logger.info("Building gold scope=%s target_date=%s", scope, target_date)
         partition_results: dict[str, int] = {}
         if scope in {"all", "hourly"}:
             partition_results.update(_build_hourly_generation_partition(session, target_date, database, gold_tables))
@@ -338,6 +343,7 @@ def run_gold_partitions(session, *, database: str, target_dates: list[str], scop
         if scope in {"all", "monthly"}:
             partition_results.update(_build_monthly_operational_sales(session, database, target_date, gold_tables))
         results[target_date] = partition_results
+        logger.info("Built gold scope=%s target_date=%s results=%s", scope, target_date, partition_results)
     return results
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from pipeline.core.registry import iter_scheduled_transform_cadence_datasets, normalize_dataset_id
@@ -8,6 +9,8 @@ from pipeline.core.windowing import month_anchor_date
 from pipeline.gold.transform import refresh_gold_dimensions, run_gold_partitions
 from pipeline.orchestration.partition_planner import plan_transform_partitions
 from pipeline.silver.transform import run_silver_partitions
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_conf(conf: dict | None) -> dict[str, str]:
@@ -72,6 +75,16 @@ def plan_transform_cadence(session, database: str, cadence_group: str, conf: dic
             "current_partition": plan.current_partition,
             "has_more_bootstrap_work": plan.has_more_bootstrap_work,
         }
+        logger.info(
+            "Planned transform dataset=%s cadence=%s bootstrap_active=%s priority=%s partitions=%s remaining_pending=%s remaining_stale=%s",
+            dataset["id"],
+            cadence_group,
+            plan.bootstrap_active,
+            plan.bootstrap_priority,
+            plan.planned_partitions,
+            plan.remaining_pending_count,
+            plan.remaining_stale_count,
+        )
     return {
         "cadence_group": cadence_group,
         "dataset_plans": plans,
@@ -99,6 +112,12 @@ def build_silver_for_cadence(session, database: str, cadence_group: str, plan_su
         if not partitions:
             silver_results[dataset_id] = []
             continue
+        logger.info(
+            "Running silver cadence=%s dataset=%s partitions=%s",
+            cadence_group,
+            dataset_id,
+            partitions,
+        )
         results = run_silver_partitions(
             session,
             dataset=normalize_dataset_id(datasets[dataset_id]["id"]),
@@ -109,6 +128,12 @@ def build_silver_for_cadence(session, database: str, cadence_group: str, plan_su
         for item in results:
             partition_date = item["partition_date"]
             gold_partitions.add(month_anchor_date(partition_date) if plan["frequency"] == "monthly" else partition_date)
+        logger.info(
+            "Finished silver cadence=%s dataset=%s results=%s",
+            cadence_group,
+            dataset_id,
+            results,
+        )
     return {
         "dataset_results": silver_results,
         "gold_partitions": sorted(gold_partitions),
@@ -119,17 +144,21 @@ def build_gold_for_cadence(session, database: str, cadence_group: str, silver_su
     partitions = silver_summary.get("gold_partitions", [])
     if not partitions:
         return {"scope": cadence_group, "partitions": [], "results": {}}
+    logger.info("Running gold cadence=%s partitions=%s", cadence_group, partitions)
     results = run_gold_partitions(
         session,
         database=database,
         target_dates=partitions,
         scope=cadence_group,
     )
+    logger.info("Finished gold cadence=%s results=%s", cadence_group, results)
     return {"scope": cadence_group, "partitions": partitions, "results": results}
 
 
 def refresh_cadence_dimensions(session, database: str, cadence_group: str) -> dict:
-    return refresh_gold_dimensions(session, database=database, scope=cadence_group)
+    results = refresh_gold_dimensions(session, database=database, scope=cadence_group)
+    logger.info("Refreshed dimensions cadence=%s results=%s", cadence_group, results)
+    return results
 
 
 def finalize_transform_state(
@@ -177,4 +206,13 @@ def finalize_transform_state(
             "last_gold_partition": last_gold_partition,
             "has_more_bootstrap_work": plan["has_more_bootstrap_work"],
         }
+        logger.info(
+            "Finalized transform state dataset=%s cadence=%s bootstrap_complete=%s last_silver_partition=%s last_gold_partition=%s has_more_bootstrap_work=%s",
+            dataset_id,
+            cadence_group,
+            bootstrap_transform_complete,
+            last_silver_partition,
+            last_gold_partition,
+            plan["has_more_bootstrap_work"],
+        )
     return finalized

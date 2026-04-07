@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from pipeline.core.registry import iter_scheduled_ingest_cadence_datasets
 from pipeline.core.snowflake import get_pipeline_state, update_ingest_state
 from pipeline.ingestion.raw_ingest import ingest_dataset
 from pipeline.orchestration.ingest_planner import plan_ingest_windows
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_conf(conf: dict | None) -> dict[str, str]:
@@ -68,6 +71,16 @@ def plan_ingest_cadence(session, database: str, cadence_group: str, conf: dict |
             "ingest_end_date": plan.ingest_end_date,
             "current_partition": plan.current_partition,
         }
+        logger.info(
+            "Planned ingest dataset=%s cadence=%s bootstrap_active=%s strategy=%s start=%s end=%s remaining_estimate=%s",
+            dataset["id"],
+            cadence_group,
+            plan.bootstrap_active,
+            plan.bootstrap_strategy,
+            plan.ingest_start_date,
+            plan.ingest_end_date,
+            plan.remaining_partitions_estimate,
+        )
     return {
         "cadence_group": cadence_group,
         "dataset_plans": plans,
@@ -89,6 +102,14 @@ def run_ingest_cadence(session, eia_settings, database: str, cadence_group: str,
     datasets = {dataset["id"]: dataset for dataset in iter_scheduled_ingest_cadence_datasets(cadence_group)}
     for dataset_id, plan in plan_summary["dataset_plans"].items():
         dataset = datasets[dataset_id]
+        logger.info(
+            "Running ingest dataset=%s cadence=%s start=%s end=%s bootstrap_active=%s",
+            dataset_id,
+            cadence_group,
+            plan["ingest_start_date"],
+            plan["ingest_end_date"],
+            plan["bootstrap_active"],
+        )
         written = ingest_dataset(
             session,
             eia_settings,
@@ -101,6 +122,14 @@ def run_ingest_cadence(session, eia_settings, database: str, cadence_group: str,
             "start_date": plan["ingest_start_date"],
             "end_date": plan["ingest_end_date"],
         }
+        logger.info(
+            "Finished ingest dataset=%s cadence=%s written=%s start=%s end=%s",
+            dataset_id,
+            cadence_group,
+            written,
+            plan["ingest_start_date"],
+            plan["ingest_end_date"],
+        )
     return ingest_results
 
 
@@ -142,4 +171,12 @@ def finalize_ingest_state(
             "last_raw_partition": last_raw_partition,
             "has_more_bootstrap_work": plan["has_more_bootstrap_work"],
         }
+        logger.info(
+            "Finalized ingest state dataset=%s cadence=%s bootstrap_complete=%s last_raw_partition=%s has_more_bootstrap_work=%s",
+            dataset_id,
+            cadence_group,
+            bootstrap_ingest_complete,
+            last_raw_partition,
+            plan["has_more_bootstrap_work"],
+        )
     return finalized

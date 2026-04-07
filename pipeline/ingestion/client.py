@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
 import requests
 
 from pipeline.core.settings import EiaSettings
+
+logger = logging.getLogger(__name__)
 
 
 def _append_query_value(query: dict[str, Any], key: str, value: Any) -> None:
@@ -48,13 +51,38 @@ def fetch_page(
     url = f"{settings.base_url}/{route}/data/"
     for attempt in range(1, settings.max_retries + 1):
         try:
+            logger.info(
+                "Requesting EIA page route=%s start=%s end=%s offset=%s attempt=%s",
+                route,
+                start,
+                end,
+                offset,
+                attempt,
+            )
             response = requests.get(url, params=query, timeout=30)
             response.raise_for_status()
             payload = response.json()
-            return payload.get("response", {}).get("data", [])
+            rows = payload.get("response", {}).get("data", [])
+            logger.info(
+                "Received EIA page route=%s start=%s end=%s offset=%s rows=%s",
+                route,
+                start,
+                end,
+                offset,
+                len(rows),
+            )
+            return rows
         except requests.RequestException:
             if attempt == settings.max_retries:
                 raise
+            logger.warning(
+                "Retrying EIA request route=%s start=%s end=%s offset=%s after attempt=%s",
+                route,
+                start,
+                end,
+                offset,
+                attempt,
+            )
             time.sleep(settings.retry_backoff_seconds**attempt)
     return []
 
@@ -67,9 +95,35 @@ def fetch_all_pages(settings: EiaSettings, dataset: dict, *, start: str, end: st
     while True:
         page = fetch_page(settings, dataset["eia_route"], params, start, end, offset)
         if not page:
+            logger.info(
+                "Finished pagination dataset=%s route=%s start=%s end=%s total_rows=%s",
+                dataset["id"],
+                dataset["eia_route"],
+                start,
+                end,
+                len(records),
+            )
             break
         records.extend(page)
         if len(page) < page_size:
+            logger.info(
+                "Final page dataset=%s route=%s start=%s end=%s page_rows=%s total_rows=%s",
+                dataset["id"],
+                dataset["eia_route"],
+                start,
+                end,
+                len(page),
+                len(records),
+            )
             break
         offset += page_size
+        logger.info(
+            "Continuing pagination dataset=%s route=%s start=%s end=%s next_offset=%s total_rows=%s",
+            dataset["id"],
+            dataset["eia_route"],
+            start,
+            end,
+            offset,
+            len(records),
+        )
     return records

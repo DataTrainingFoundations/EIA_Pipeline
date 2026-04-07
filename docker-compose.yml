@@ -56,7 +56,13 @@ services:
           airflow dags unpause eia_hourly_ingest &&
           airflow dags unpause eia_hourly_transform &&
           airflow dags unpause eia_monthly_ingest &&
-          airflow dags unpause eia_monthly_transform
+          airflow dags unpause eia_monthly_transform &&
+          if ! airflow dags list-runs -d eia_hourly_ingest --no-backfill | grep -q "eia_hourly_ingest"; then
+            airflow dags trigger eia_hourly_ingest;
+          fi &&
+          if ! airflow dags list-runs -d eia_monthly_ingest --no-backfill | grep -q "eia_monthly_ingest"; then
+            airflow dags trigger eia_monthly_ingest;
+          fi
         ) &
         airflow scheduler &
         exec airflow webserver

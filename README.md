@@ -85,5 +85,6 @@ Streamlit: `http://localhost:28501`
 - Only ingest talks to the EIA API; transform scans RAW and state to determine what still needs publishing.
 - The pipeline automatically bootstraps configured historical data with larger bootstrap batch sizes than steady-state repair runs.
 - Bootstrap runs can self-trigger follow-up ingest and transform runs until backlog is drained, then fall back to normal schedules.
+- On a fresh local startup, Airflow auto-triggers the first hourly and monthly ingest runs when no prior ingest runs exist.
 - SILVER and GOLD partition data by business date derived from the EIA `PERIOD` field rather than ingest date.
 - Pipeline cadence state is stored in `EIA_PIPELINE.META.PIPELINE_RUN_STATE` with separate ingest and transform progress fields.

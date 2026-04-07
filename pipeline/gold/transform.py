@@ -7,6 +7,7 @@ from snowflake.snowpark.functions import (
     concat,
     current_timestamp,
     lit,
+    to_date,
     max as sf_max,
     md5,
     round as sf_round,
@@ -63,9 +64,13 @@ OPS_STABLE_COLS = [
     "fuel_type_id",
     "generation",
 ]
-RENEWABLE_FUELS = {"SUN", "WND", "WAT"}
-FOSSIL_FUELS = {"NG", "COL"}
-NUCLEAR_FUELS = {"NUC"}
+VALID_STATES = [
+    "AK","AL","AR","AZ","CA","CO","CT","DC","DE","FL","GA","HI","IA","ID",
+    "IL","IN","KS","KY","LA","MA","MD","ME","MI","MN","MO","MS","MT","NC",
+    "ND","NE","NH","NJ","NM","NV","NY","OH","OK","OR","PA","RI","SC","SD",
+    "TN","TX","UT","VA","VT","WA","WI","WV","WY"
+]
+
 
 
 def _silver_table(database: str, table_name: str) -> str:
@@ -236,71 +241,53 @@ def _build_hourly_demand_partition(session, target_date: str, database: str, gol
 def _build_monthly_operational_sales(session, database: str, target_date: str, gold_tables: dict[str, str]) -> dict[str, int]:
     partition_date = month_anchor_date(target_date)
     sales_table = _silver_table(database, "SILVER_ELECTRICITY_RETAIL_SALES")
-    ops_table = _silver_table(database, "SILVER_ELECTRICITY_POWER_OPERATIONAL_DATA")
-    if not table_exists(session, sales_table) or not table_exists(session, ops_table):
+
+    if not table_exists(session, sales_table):
         return {}
 
     sales_df = _stabilize_monthly_sales(
         session.table(sales_table).filter(col("partition_date") == lit(partition_date))
     )
-    ops_df = _stabilize_monthly_ops(
-        session.table(ops_table).filter(col("partition_date") == lit(partition_date))
-    )
-    if sales_df.count() == 0 or ops_df.count() == 0:
+
+    if sales_df.count() == 0:
         return {}
 
-    mix_df = (
-        ops_df.group_by("period", "business_date", "state_id", "state_description")
-        .agg(
-            sf_round(sf_sum("generation"), 4).alias("generation"),
-            sf_round(
-                sf_sum(when(col("fuel_type_id").isin(list(FOSSIL_FUELS)), col("generation")).otherwise(lit(0.0))),
-                4,
-            ).alias("fossil_generation"),
-            sf_round(
-                sf_sum(when(col("fuel_type_id").isin(list(RENEWABLE_FUELS)), col("generation")).otherwise(lit(0.0))),
-                4,
-            ).alias("renewable_generation"),
-            sf_round(
-                sf_sum(when(col("fuel_type_id").isin(list(NUCLEAR_FUELS)), col("generation")).otherwise(lit(0.0))),
-                4,
-            ).alias("nuclear_generation"),
-        )
-        .select(
-            col("period"),
-            col("business_date"),
-            col("state_id"),
-            col("state_description"),
-            col("generation"),
-            _safe_pct(col("fossil_generation"), col("generation")).alias("fossil_pct"),
-            _safe_pct(col("renewable_generation"), col("generation")).alias("renewable_pct"),
-            _safe_pct(col("nuclear_generation"), col("generation")).alias("nuclear_pct"),
-        )
+    # Aggregation logic (from create_fact_table)
+    fact = (
+    sales_df
+    .filter(col("sector_abbr") != "ALL")
+    .filter(col("state_id").isin(VALID_STATES))
+    .group_by("period", "state_id", "state_description", "sector_abbr", "sector_name")
+    .agg(
+        sf_sum(col("sales").cast("float")).alias("retail_sales_mwh"),
+        sf_sum(col("revenue").cast("float")).alias("revenue"),
+        sf_sum(col("customers").cast("float")).alias("customers"),
+        when(sf_sum(col("sales").cast("float")) > 0,
+             sf_sum(col("price").cast("float") * col("sales").cast("float")) /
+             sf_sum(col("sales").cast("float"))
+        ).otherwise(None).alias("avg_price"),
     )
+    .select(
+        # Convert period 'YYYY-MM' to a DATE like 'YYYY-MM-01'
+        to_date(concat(col("period"), lit("-01")), "YYYY-MM-DD").alias("period"),
+        col("state_id"),
+        col("state_description"),
+        col("sector_abbr"),
+        col("sector_name"),
+        col("retail_sales_mwh").alias("sales"),
+        col("revenue"),
+        col("avg_price").alias("price"),
+        col("customers"),
+        lit(partition_date).alias("partition_date"),
+        current_timestamp().alias("gold_processed_at"),
+        _record_hash(col("period"), col("state_id"), col("sector_abbr")).alias("record_id"),
 
-    combined = (
-        sales_df.join(mix_df, on=["period", "business_date", "state_id", "state_description"], how="left")
-        .select(
-            _record_hash(col("period"), col("state_id"), col("sector_abbr")).alias("record_id"),
-            col("business_date").alias("period"),
-            col("state_id"),
-            col("state_description"),
-            col("sector_abbr"),
-            col("sector_name"),
-            col("customers"),
-            col("price"),
-            col("revenue"),
-            col("sales"),
-            col("generation"),
-            col("fossil_pct"),
-            col("renewable_pct"),
-            col("nuclear_pct"),
-            lit(partition_date).alias("partition_date"),
+            )
         )
-    )
-    monthly_table = _gold_table(database, gold_tables["gold_electricity_operational_sales"])
+
+    monthly_table = _gold_table(database, gold_tables["fact_sales_monthly"])
     return {
-        "gold_electricity_operational_sales": _write_partitioned_table(session, combined, monthly_table, partition_date)
+        "fact_sales_monthly": _write_partitioned_table(session, fact, monthly_table, partition_date)
     }
 
 

@@ -77,14 +77,16 @@ def plan_ingest_windows(
         remaining_partitions_estimate = len(missing)
         if missing:
             if resolved_bootstrap_priority == "latest_first":
+                latest_missing = missing[-1]
                 selected = list(reversed(missing))[:bootstrap_batch_size]
-                selected.sort()
                 bootstrap_strategy = "latest_first"
+                ingest_end_date = latest_missing
+                ingest_start_date = shift_partition(latest_missing, frequency, -(len(selected) - 1))
             else:
                 selected = missing[:bootstrap_batch_size]
                 bootstrap_strategy = "oldest_first"
-            ingest_start_date = selected[0]
-            ingest_end_date = selected[-1]
+                ingest_start_date = selected[0]
+                ingest_end_date = shift_partition(selected[0], frequency, len(selected) - 1)
             has_more_bootstrap_work = len(missing) > len(selected)
         else:
             ingest_start_date = latest_target_partition

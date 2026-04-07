@@ -1,37 +1,57 @@
-"""Shared database access helpers for the EIA Streamlit app."""
+"""Shared Snowflake access helpers for the EIA Streamlit app."""
 
 from __future__ import annotations
 
-import os
-from contextlib import closing
-from typing import Any
-
 import pandas as pd
-import psycopg2
+import snowflake.connector
 
-# ── Table names ───────────────────────────────────────────────────────────────
-FACT_GENERATION_HOURLY  = "fact_generation_hourly"
-FACT_DEMAND_HOURLY      = "fact_demand_hourly"
-AGG_DAILY_GENERATION    = "agg_daily_generation"
-AGG_DAILY_DEMAND_PEAK   = "agg_daily_demand_peak"
-DIM_BALANCING_AUTHORITY = "dim_balancing_authority"
-DIM_FUEL_TYPE           = "dim_fuel_type"
+from pipeline.core.settings import load_app_snowflake_settings
+
+FACT_GENERATION_HOURLY = "FACT_GENERATION_HOURLY"
+FACT_DEMAND_HOURLY = "FACT_DEMAND_HOURLY"
+AGG_DAILY_GENERATION = "AGG_DAILY_GENERATION"
+AGG_DAILY_DEMAND_PEAK = "AGG_DAILY_DEMAND_PEAK"
+DIM_BALANCING_AUTHORITY = "DIM_BALANCING_AUTHORITY"
+DIM_FUEL_TYPE = "DIM_FUEL_TYPE"
+SILVER_ELECTRICITY_RETAIL_SALES = "SILVER_ELECTRICITY_RETAIL_SALES"
+SILVER_ELECTRICITY_POWER_OPERATIONAL_DATA = "SILVER_ELECTRICITY_POWER_OPERATIONAL_DATA"
+GOLD_ELECTRICITY_OPERATIONAL_SALES = "GOLD_ELECTRICITY_OPERATIONAL_SALES"
 
 
 def _connection_kwargs() -> dict[str, object]:
+    settings = load_app_snowflake_settings()
     return {
-        "host":     os.getenv("POSTGRES_HOST",     "postgres"),
-        "port":     int(os.getenv("POSTGRES_PORT", "5432")),
-        "dbname":   os.getenv("POSTGRES_DB",       "platform"),
-        "user":     os.getenv("POSTGRES_USER",     "platform"),
-        "password": os.getenv("POSTGRES_PASSWORD", "platform"),
+        "account": settings.account,
+        "user": settings.user,
+        "password": settings.password,
+        "role": settings.role,
+        "warehouse": settings.warehouse,
+        "database": settings.database,
+        "schema": settings.schema,
     }
 
 
 def get_connection():
-    return psycopg2.connect(**_connection_kwargs())
+    return snowflake.connector.connect(**_connection_kwargs())
 
 
-def _safe_read_sql(query: str, params: list[Any] | None = None) -> pd.DataFrame:
-    with closing(get_connection()) as conn:
-        return pd.read_sql_query(query, conn, params=params)
+def _safe_read_sql(query: str) -> pd.DataFrame:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query)
+            frame = cur.fetch_pandas_all()
+            frame.columns = [column.lower() for column in frame.columns]
+            return frame
+
+
+def sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def sql_in_list(values: list[str]) -> str:
+    return ", ".join(sql_literal(value) for value in values)
+
+
+def qualified_table(schema: str, table_name: str) -> str:
+    settings = load_app_snowflake_settings()
+    return f"{settings.database}.{schema}.{table_name}"

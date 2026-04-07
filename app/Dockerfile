@@ -2,24 +2,21 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY app/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Data access modules
-COPY data_access.py .
-COPY data_access_shared.py .
-COPY data_access_summary.py .
-COPY data_access_generation.py .
-COPY data_access_demand.py .
-
-# Utilities
-COPY ui_utils.py .
-COPY respondent_geo.py .
-
-# Main app entry point
-COPY streamlit_app.py .
-
-# Dashboard pages
-COPY pages/ ./pages/
+COPY app/data_access.py .
+COPY app/data_access_shared.py .
+COPY app/data_access_summary.py .
+COPY app/data_access_generation.py .
+COPY app/data_access_demand.py .
+COPY app/data_access_sales.py .
+COPY app/data_access_operational.py .
+COPY app/data_access_operational_sales.py .
+COPY app/ui_utils.py .
+COPY app/respondent_geo.py .
+COPY app/streamlit_app.py .
+COPY app/pages/ ./pages/
+COPY pipeline /app/pipeline
 
 CMD ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]

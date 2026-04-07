@@ -1,84 +1,173 @@
-"""EIA Analytics — home page."""
+"""EIA Analytics home page."""
+
+from __future__ import annotations
 
 import streamlit as st
 
 from data_access import (
     get_connection,
-    get_generation_coverage,
-    get_demand_coverage,
     get_daily_generation_coverage,
+    get_demand_coverage,
+    get_generation_coverage,
+    get_generation_zero_value_summary,
+    get_gold_coverage_summary,
+    get_monthly_sales_coverage,
+    get_pipeline_state_summary,
+    get_raw_coverage_summary,
+    qualified_table,
+    SILVER_ELECTRICITY_RETAIL_SALES,
     table_has_rows,
 )
 
 st.set_page_config(page_title="EIA Analytics", layout="wide")
-st.title("EIA Electricity Analytics")
-st.caption(
-    "Near-real-time electricity generation and demand dashboards "
-    "powered by the EIA Open Data API."
+st.markdown(
+    """
+    <style>
+    .hero-copy { color: #4b5563; max-width: 54rem; }
+    .dashboard-card {
+        border: 1px solid #d1d5db;
+        border-radius: 0.85rem;
+        padding: 1rem 1.1rem;
+        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+        min-height: 12rem;
+    }
+    .dashboard-card h3 { margin-top: 0; margin-bottom: 0.4rem; }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
-# ── Connection check ──────────────────────────────────────────────────────────
+st.title("EIA Electricity Analytics")
+st.markdown(
+    """
+<div class="hero-copy">
+Gold serves a dashboard-friendly star schema: hourly facts for generation and demand,
+small shared dimensions, daily aggregates for trend monitoring, and a monthly sales mart
+for longer-horizon state and sector analysis.
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
 try:
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("select now()")
+            cur.execute("select current_timestamp()")
             server_time = cur.fetchone()[0]
-    st.success(f"PostgreSQL connected — server time: {server_time}")
+    st.success(f"Snowflake connected. Server time: {server_time}")
 except Exception as exc:
     st.error(f"Database connection failed: {exc}")
     st.stop()
 
-# ── Persona cards ─────────────────────────────────────────────────────────────
-st.subheader("Dashboards")
-col1, col2 = st.columns(2)
+card_left, card_mid, card_right = st.columns(3)
+with card_left:
+    st.markdown(
+        """
+<div class="dashboard-card">
+    <h3>Generation Mix Monitor</h3>
+    <p>Track hourly generation by fuel type, rank fossil-heavy regions, and inspect one BA's mix over time.</p>
+    <p><strong>Uses:</strong> FACT_GENERATION_HOURLY, AGG_DAILY_GENERATION, DIM_FUEL_TYPE</p>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+    if hasattr(st, "page_link"):
+        st.page_link("pages/generation_mix_monitor.py", label="Open Generation Mix Monitor")
 
-col1.markdown("""
-**Generation Mix Monitor**
-Track hourly electricity generation by fuel type across balancing authorities.
-Surfaces which BAs are most dependent on fossil fuels right now and shows
-renewable vs fossil share trends.
-""")
+with card_mid:
+    st.markdown(
+        """
+<div class="dashboard-card">
+    <h3>Demand & Forecast Tracker</h3>
+    <p>Monitor latest forecast misses, track daily peaks, and drill into demand volatility for one BA.</p>
+    <p><strong>Uses:</strong> FACT_DEMAND_HOURLY, AGG_DAILY_DEMAND_PEAK, DIM_BALANCING_AUTHORITY</p>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+    if hasattr(st, "page_link"):
+        st.page_link("pages/demand_forecast_tracker.py", label="Open Demand & Forecast Tracker")
 
-col2.markdown("""
-**Demand & Forecast Tracker**
-Monitor hourly electricity demand vs day-ahead forecast per balancing authority.
-Surfaces regions with the largest forecast misses and tracks daily peak demand trends.
-""")
+with card_right:
+    st.markdown(
+        """
+<div class="dashboard-card">
+    <h3>Monthly Sales Trends</h3>
+    <p>Track monthly retail sales, revenue, price, and customers by state and sector, with fuel-mix overlays when available.</p>
+    <p><strong>Uses:</strong> GOLD_ELECTRICITY_OPERATIONAL_SALES, SILVER_ELECTRICITY_RETAIL_SALES</p>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+    if hasattr(st, "page_link"):
+        st.page_link("pages/monthly_sales_trends.py", label="Open Monthly Sales Trends")
 
-if hasattr(st, "page_link"):
-    link1, link2 = st.columns(2)
-    link1.page_link("pages/generation_mix_monitor.py",  label="→ Generation Mix Monitor")
-    link2.page_link("pages/demand_forecast_tracker.py", label="→ Demand & Forecast Tracker")
-
-# ── Data coverage ─────────────────────────────────────────────────────────────
 st.subheader("Data coverage")
-c1, c2, c3 = st.columns(3)
+cov_left, cov_mid, cov_right, cov_far = st.columns(4)
 
-if table_has_rows("fact_generation_hourly"):
+if table_has_rows("FACT_GENERATION_HOURLY"):
     cov = get_generation_coverage()
-    c1.metric("Generation rows",   f"{int(cov['row_count']):,}")
-    c1.caption(f"{cov['ba_count']} BAs · {cov['fuel_count']} fuel types")
-    c1.caption(f"Latest: {cov['max_period']}")
+    cov_left.metric("Generation rows", f"{int(cov['row_count']):,}")
+    cov_left.caption(f"{cov['ba_count']} balancing authorities")
+    cov_left.caption(f"{cov['fuel_count']} fuel types")
+    cov_left.caption(f"Latest period: {cov['max_period']}")
 else:
-    c1.warning("No generation data yet")
+    cov_left.warning("No generation data yet.")
 
-if table_has_rows("fact_demand_hourly"):
+if table_has_rows("FACT_DEMAND_HOURLY"):
     cov = get_demand_coverage()
-    c2.metric("Demand rows",       f"{int(cov['row_count']):,}")
-    c2.caption(f"{cov['ba_count']} BAs")
-    c2.caption(f"Latest: {cov['max_period']}")
+    cov_mid.metric("Demand rows", f"{int(cov['row_count']):,}")
+    cov_mid.caption(f"{cov['ba_count']} balancing authorities")
+    cov_mid.caption(f"Latest period: {cov['max_period']}")
 else:
-    c2.warning("No demand data yet")
+    cov_mid.warning("No demand data yet.")
 
-if table_has_rows("agg_daily_generation"):
+if table_has_rows("AGG_DAILY_GENERATION"):
     cov = get_daily_generation_coverage()
-    c3.metric("Daily agg rows",    f"{int(cov['row_count']):,}")
-    c3.caption(f"{cov['min_date']} → {cov['max_date']}")
+    cov_right.metric("Daily aggregate rows", f"{int(cov['row_count']):,}")
+    cov_right.caption(f"Coverage: {cov['min_date']} to {cov['max_date']}")
 else:
-    c3.warning("No daily agg data yet")
+    cov_right.warning("No daily generation aggregates yet.")
+
+if table_has_rows(qualified_table("SILVER", SILVER_ELECTRICITY_RETAIL_SALES)):
+    cov = get_monthly_sales_coverage()
+    cov_far.metric("Monthly sales rows", f"{int(cov['row_count']):,}")
+    cov_far.caption(f"{cov['state_count']} states")
+    cov_far.caption(f"{cov['sector_count']} sectors")
+    cov_far.caption(f"Latest period: {cov['max_period']}")
+else:
+    cov_far.warning("No monthly sales data yet.")
 
 st.info(
-    "Data refreshes every hour at :15 past. "
-    "To load historical data, trigger the **eia_backfill_pipeline** DAG "
-    "from the Airflow UI with a start_date and end_date."
+    "Ingest and transform now run as separate Airflow DAGs for hourly and monthly cadence groups. "
+    "Bootstrap can chain follow-up runs automatically until RAW and published history catch up."
 )
+
+st.subheader("Bootstrap diagnostics")
+diag_left, diag_right = st.columns(2)
+with diag_left:
+    try:
+        st.caption("Pipeline state")
+        st.dataframe(get_pipeline_state_summary(), use_container_width=True, hide_index=True)
+    except Exception as exc:
+        st.warning(f"Pipeline state unavailable: {exc}")
+with diag_right:
+    try:
+        st.caption("RAW coverage")
+        st.dataframe(get_raw_coverage_summary(), use_container_width=True, hide_index=True)
+    except Exception as exc:
+        st.warning(f"RAW coverage unavailable: {exc}")
+
+try:
+    st.caption("Published GOLD coverage")
+    st.dataframe(get_gold_coverage_summary(), use_container_width=True, hide_index=True)
+except Exception as exc:
+    st.warning(f"GOLD coverage unavailable: {exc}")
+
+try:
+    zero_summary = get_generation_zero_value_summary()
+    if zero_summary:
+        st.caption("Recent generation zero-value rows")
+        st.dataframe(zero_summary, use_container_width=True, hide_index=True)
+except Exception as exc:
+    st.warning(f"Generation zero-value diagnostics unavailable: {exc}")

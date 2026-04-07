@@ -1,7 +1,8 @@
-docs/
 .env
 .env.*
 !.env.example
+AGENTS.md
+docs/
 
 # Python
 __pycache__/
@@ -27,4 +28,3 @@ Thumbs.db
 # Logs
 *.log
 logs/
-

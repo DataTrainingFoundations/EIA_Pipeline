@@ -64,6 +64,23 @@ def iter_scheduled_cadence_datasets(cadence_group: str) -> list[dict]:
     ]
 
 
+def iter_scheduled_ingest_cadence_datasets(cadence_group: str) -> list[dict]:
+    return [
+        dataset
+        for dataset in iter_cadence_datasets(cadence_group)
+        if dataset.get("scheduled_ingest", dataset.get("frequency") == "hourly")
+    ]
+
+
+def iter_scheduled_transform_cadence_datasets(cadence_group: str) -> list[dict]:
+    return [
+        dataset
+        for dataset in iter_cadence_datasets(cadence_group)
+        if dataset.get("transform_enabled", False)
+        and dataset.get("scheduled_transform", dataset.get("frequency") == "hourly")
+    ]
+
+
 def iter_monthly_ingest_datasets() -> list[dict]:
     return [dataset for dataset in load_registry() if dataset.get("frequency") == "monthly"]
 

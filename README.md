@@ -13,12 +13,14 @@ Runtime layout:
 - `pipeline/ingestion`: EIA API client and RAW ingest orchestration
 - `pipeline/silver`: RAW to SILVER transforms
 - `pipeline/gold`: SILVER to GOLD transforms and the gold CLI entrypoint
-- `pipeline/orchestration`: automatic bronze-to-gold partition planning and cadence execution
+- `pipeline/orchestration`: separate ingest and transform planning/runtime helpers
 
 Airflow runtime:
 
-- `eia_hourly_bronze_to_gold` for fully automatic hourly processing
-- `eia_monthly_bronze_to_gold` for fully automatic monthly processing
+- `eia_hourly_ingest` for hourly RAW ingestion
+- `eia_hourly_transform` for hourly RAW-driven SILVER/GOLD publishing
+- `eia_monthly_ingest` for monthly RAW ingestion
+- `eia_monthly_transform` for monthly RAW-driven SILVER/GOLD publishing
 
 Gold shape:
 
@@ -51,6 +53,7 @@ CREATE SCHEMA IF NOT EXISTS EIA_PIPELINE.META;
 ```
 
 Fill in the Snowflake variables in `.env`.
+The local Airflow metadata database uses the `POSTGRES_*` values from `.env`.
 
 ## Start
 
@@ -73,11 +76,14 @@ Streamlit: `http://localhost:28501`
 
 ## Notes
 
-- The active local runtime is `airflow`, `app`, and the optional standalone `ingestion` service backed by `pipeline/ingestion`.
+- The active local runtime is `airflow`, `airflow-db`, `app`, and the optional standalone `ingestion` service backed by `pipeline/ingestion`.
 - All substantive pipeline logic now lives under `pipeline/`.
 - Snowflake is the source of truth for RAW, SILVER, and GOLD data.
 - dbt remains the planned testing layer on top of Snowflake.
-- Bronze-to-gold scheduling is automatic for both hourly and monthly cadence groups.
-- The pipeline automatically bootstraps configured historical data and then keeps recent partitions repaired without manual backfills.
+- Airflow uses a Postgres metadata database locally so `LocalExecutor` can run multiple tasks without the SQLite bottleneck.
+- Ingest and transform are scheduled separately for both hourly and monthly cadence groups.
+- Only ingest talks to the EIA API; transform scans RAW and state to determine what still needs publishing.
+- The pipeline automatically bootstraps configured historical data with larger bootstrap batch sizes than steady-state repair runs.
+- Bootstrap runs can self-trigger follow-up ingest and transform runs until backlog is drained, then fall back to normal schedules.
 - SILVER and GOLD partition data by business date derived from the EIA `PERIOD` field rather than ingest date.
-- Pipeline cadence state is stored in `EIA_PIPELINE.META.PIPELINE_RUN_STATE`.
+- Pipeline cadence state is stored in `EIA_PIPELINE.META.PIPELINE_RUN_STATE` with separate ingest and transform progress fields.

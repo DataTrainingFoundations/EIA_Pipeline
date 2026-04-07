@@ -12,6 +12,23 @@ from pipeline.core.windowing import current_partition_date, month_anchor_date
 META_SCHEMA = "META"
 PIPELINE_STATE_TABLE = "PIPELINE_RUN_STATE"
 
+_PIPELINE_STATE_COLUMNS = {
+    "dataset_id": "STRING",
+    "frequency": "STRING",
+    "bootstrap_ingest_complete": "BOOLEAN",
+    "bootstrap_transform_complete": "BOOLEAN",
+    "last_raw_partition": "DATE",
+    "last_silver_partition": "DATE",
+    "last_gold_partition": "DATE",
+    "last_ingest_started_at": "TIMESTAMP_NTZ",
+    "last_ingest_succeeded_at": "TIMESTAMP_NTZ",
+    "last_transform_started_at": "TIMESTAMP_NTZ",
+    "last_transform_succeeded_at": "TIMESTAMP_NTZ",
+    "last_ingest_error_message": "STRING",
+    "last_transform_error_message": "STRING",
+    "updated_at": "TIMESTAMP_NTZ",
+}
+
 
 def get_snowpark_session(settings: SnowflakeSettings):
     return Session.builder.configs(
@@ -145,26 +162,56 @@ def _sql_literal(value: str | None) -> str:
     return f"'{escaped}'"
 
 
+def _state_table_name(database: str) -> str:
+    return f"{database}.{META_SCHEMA}.{PIPELINE_STATE_TABLE}"
+
+
 def ensure_pipeline_state_table(session, database: str) -> str:
-    session.sql(f"CREATE SCHEMA IF NOT EXISTS {database}.{META_SCHEMA}").collect()
-    table_name = f"{database}.{META_SCHEMA}.{PIPELINE_STATE_TABLE}"
+    table_name = _state_table_name(database)
     session.sql(
         f"""
         CREATE TABLE IF NOT EXISTS {table_name} (
             dataset_id STRING,
             frequency STRING,
-            bootstrap_complete BOOLEAN,
+            bootstrap_ingest_complete BOOLEAN,
+            bootstrap_transform_complete BOOLEAN,
             last_raw_partition DATE,
             last_silver_partition DATE,
             last_gold_partition DATE,
-            last_run_started_at TIMESTAMP_NTZ,
-            last_run_succeeded_at TIMESTAMP_NTZ,
-            last_error_message STRING,
+            last_ingest_started_at TIMESTAMP_NTZ,
+            last_ingest_succeeded_at TIMESTAMP_NTZ,
+            last_transform_started_at TIMESTAMP_NTZ,
+            last_transform_succeeded_at TIMESTAMP_NTZ,
+            last_ingest_error_message STRING,
+            last_transform_error_message STRING,
             updated_at TIMESTAMP_NTZ
         )
         """
     ).collect()
+    for column_name, column_type in _PIPELINE_STATE_COLUMNS.items():
+        session.sql(
+            f"ALTER TABLE IF EXISTS {table_name} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
+        ).collect()
     return table_name
+
+
+def _default_pipeline_state(dataset_id: str) -> dict[str, Any]:
+    return {
+        "dataset_id": dataset_id,
+        "frequency": "",
+        "bootstrap_ingest_complete": False,
+        "bootstrap_transform_complete": False,
+        "last_raw_partition": None,
+        "last_silver_partition": None,
+        "last_gold_partition": None,
+        "last_ingest_started_at": None,
+        "last_ingest_succeeded_at": None,
+        "last_transform_started_at": None,
+        "last_transform_succeeded_at": None,
+        "last_ingest_error_message": None,
+        "last_transform_error_message": None,
+        "updated_at": None,
+    }
 
 
 def get_pipeline_state(session, database: str, dataset_id: str) -> dict[str, Any]:
@@ -173,20 +220,11 @@ def get_pipeline_state(session, database: str, dataset_id: str) -> dict[str, Any
         f"SELECT * FROM {table_name} WHERE dataset_id = {_sql_literal(dataset_id)}"
     ).collect()
     if not rows:
-        return {
-            "dataset_id": dataset_id,
-            "frequency": "",
-            "bootstrap_complete": False,
-            "last_raw_partition": None,
-            "last_silver_partition": None,
-            "last_gold_partition": None,
-            "last_run_started_at": None,
-            "last_run_succeeded_at": None,
-            "last_error_message": None,
-            "updated_at": None,
-        }
+        return _default_pipeline_state(dataset_id)
     row = rows[0].as_dict()
-    return {key.lower(): value for key, value in row.items()}
+    state = _default_pipeline_state(dataset_id)
+    state.update({key.lower(): value for key, value in row.items()})
+    return state
 
 
 def upsert_pipeline_state(
@@ -195,13 +233,17 @@ def upsert_pipeline_state(
     dataset_id: str,
     *,
     frequency: str,
-    bootstrap_complete: bool,
+    bootstrap_ingest_complete: bool,
+    bootstrap_transform_complete: bool,
     last_raw_partition: str | None,
     last_silver_partition: str | None,
     last_gold_partition: str | None,
-    last_run_started_at: str | None,
-    last_run_succeeded_at: str | None,
-    last_error_message: str | None,
+    last_ingest_started_at: str | None,
+    last_ingest_succeeded_at: str | None,
+    last_transform_started_at: str | None,
+    last_transform_succeeded_at: str | None,
+    last_ingest_error_message: str | None,
+    last_transform_error_message: str | None,
 ) -> None:
     table_name = ensure_pipeline_state_table(session, database)
     session.sql(
@@ -211,51 +253,132 @@ def upsert_pipeline_state(
             SELECT
                 {_sql_literal(dataset_id)} AS dataset_id,
                 {_sql_literal(frequency)} AS frequency,
-                {str(bool(bootstrap_complete)).upper()} AS bootstrap_complete,
+                {str(bool(bootstrap_ingest_complete)).upper()} AS bootstrap_ingest_complete,
+                {str(bool(bootstrap_transform_complete)).upper()} AS bootstrap_transform_complete,
                 TO_DATE({_sql_literal(last_raw_partition)}) AS last_raw_partition,
                 TO_DATE({_sql_literal(last_silver_partition)}) AS last_silver_partition,
                 TO_DATE({_sql_literal(last_gold_partition)}) AS last_gold_partition,
-                TO_TIMESTAMP_NTZ({_sql_literal(last_run_started_at)}) AS last_run_started_at,
-                TO_TIMESTAMP_NTZ({_sql_literal(last_run_succeeded_at)}) AS last_run_succeeded_at,
-                {_sql_literal(last_error_message)} AS last_error_message,
+                TO_TIMESTAMP_NTZ({_sql_literal(last_ingest_started_at)}) AS last_ingest_started_at,
+                TO_TIMESTAMP_NTZ({_sql_literal(last_ingest_succeeded_at)}) AS last_ingest_succeeded_at,
+                TO_TIMESTAMP_NTZ({_sql_literal(last_transform_started_at)}) AS last_transform_started_at,
+                TO_TIMESTAMP_NTZ({_sql_literal(last_transform_succeeded_at)}) AS last_transform_succeeded_at,
+                {_sql_literal(last_ingest_error_message)} AS last_ingest_error_message,
+                {_sql_literal(last_transform_error_message)} AS last_transform_error_message,
                 CURRENT_TIMESTAMP() AS updated_at
         ) source
         ON target.dataset_id = source.dataset_id
         WHEN MATCHED THEN UPDATE SET
             frequency = source.frequency,
-            bootstrap_complete = source.bootstrap_complete,
+            bootstrap_ingest_complete = source.bootstrap_ingest_complete,
+            bootstrap_transform_complete = source.bootstrap_transform_complete,
             last_raw_partition = source.last_raw_partition,
             last_silver_partition = source.last_silver_partition,
             last_gold_partition = source.last_gold_partition,
-            last_run_started_at = source.last_run_started_at,
-            last_run_succeeded_at = source.last_run_succeeded_at,
-            last_error_message = source.last_error_message,
+            last_ingest_started_at = source.last_ingest_started_at,
+            last_ingest_succeeded_at = source.last_ingest_succeeded_at,
+            last_transform_started_at = source.last_transform_started_at,
+            last_transform_succeeded_at = source.last_transform_succeeded_at,
+            last_ingest_error_message = source.last_ingest_error_message,
+            last_transform_error_message = source.last_transform_error_message,
             updated_at = source.updated_at
         WHEN NOT MATCHED THEN INSERT (
             dataset_id,
             frequency,
-            bootstrap_complete,
+            bootstrap_ingest_complete,
+            bootstrap_transform_complete,
             last_raw_partition,
             last_silver_partition,
             last_gold_partition,
-            last_run_started_at,
-            last_run_succeeded_at,
-            last_error_message,
+            last_ingest_started_at,
+            last_ingest_succeeded_at,
+            last_transform_started_at,
+            last_transform_succeeded_at,
+            last_ingest_error_message,
+            last_transform_error_message,
             updated_at
         ) VALUES (
             source.dataset_id,
             source.frequency,
-            source.bootstrap_complete,
+            source.bootstrap_ingest_complete,
+            source.bootstrap_transform_complete,
             source.last_raw_partition,
             source.last_silver_partition,
             source.last_gold_partition,
-            source.last_run_started_at,
-            source.last_run_succeeded_at,
-            source.last_error_message,
+            source.last_ingest_started_at,
+            source.last_ingest_succeeded_at,
+            source.last_transform_started_at,
+            source.last_transform_succeeded_at,
+            source.last_ingest_error_message,
+            source.last_transform_error_message,
             source.updated_at
         )
         """
     ).collect()
+
+
+def update_ingest_state(
+    session,
+    database: str,
+    dataset_id: str,
+    *,
+    frequency: str,
+    bootstrap_ingest_complete: bool,
+    last_raw_partition: str | None,
+    last_ingest_started_at: str | None,
+    last_ingest_succeeded_at: str | None,
+    last_ingest_error_message: str | None,
+) -> None:
+    prior_state = get_pipeline_state(session, database, dataset_id)
+    upsert_pipeline_state(
+        session,
+        database,
+        dataset_id,
+        frequency=frequency,
+        bootstrap_ingest_complete=bootstrap_ingest_complete,
+        bootstrap_transform_complete=bool(prior_state.get("bootstrap_transform_complete")),
+        last_raw_partition=last_raw_partition or _normalize_result_value(prior_state.get("last_raw_partition")),
+        last_silver_partition=_normalize_result_value(prior_state.get("last_silver_partition")),
+        last_gold_partition=_normalize_result_value(prior_state.get("last_gold_partition")),
+        last_ingest_started_at=last_ingest_started_at,
+        last_ingest_succeeded_at=last_ingest_succeeded_at,
+        last_transform_started_at=_normalize_result_value(prior_state.get("last_transform_started_at")),
+        last_transform_succeeded_at=_normalize_result_value(prior_state.get("last_transform_succeeded_at")),
+        last_ingest_error_message=last_ingest_error_message,
+        last_transform_error_message=prior_state.get("last_transform_error_message"),
+    )
+
+
+def update_transform_state(
+    session,
+    database: str,
+    dataset_id: str,
+    *,
+    frequency: str,
+    bootstrap_transform_complete: bool,
+    last_silver_partition: str | None,
+    last_gold_partition: str | None,
+    last_transform_started_at: str | None,
+    last_transform_succeeded_at: str | None,
+    last_transform_error_message: str | None,
+) -> None:
+    prior_state = get_pipeline_state(session, database, dataset_id)
+    upsert_pipeline_state(
+        session,
+        database,
+        dataset_id,
+        frequency=frequency,
+        bootstrap_ingest_complete=bool(prior_state.get("bootstrap_ingest_complete")),
+        bootstrap_transform_complete=bootstrap_transform_complete,
+        last_raw_partition=_normalize_result_value(prior_state.get("last_raw_partition")),
+        last_silver_partition=last_silver_partition or _normalize_result_value(prior_state.get("last_silver_partition")),
+        last_gold_partition=last_gold_partition or _normalize_result_value(prior_state.get("last_gold_partition")),
+        last_ingest_started_at=_normalize_result_value(prior_state.get("last_ingest_started_at")),
+        last_ingest_succeeded_at=_normalize_result_value(prior_state.get("last_ingest_succeeded_at")),
+        last_transform_started_at=last_transform_started_at,
+        last_transform_succeeded_at=last_transform_succeeded_at,
+        last_ingest_error_message=prior_state.get("last_ingest_error_message"),
+        last_transform_error_message=last_transform_error_message,
+    )
 
 
 def raw_partition_expression(frequency: str) -> str:
@@ -276,9 +399,11 @@ def list_partition_status(
     partition_expr = "partition_date" if processed_column != "_INGESTED_AT" else raw_partition_expression(frequency)
     clauses = [f"{partition_expr} IS NOT NULL"]
     if start_date:
-        clauses.append(f"{partition_expr} >= TO_DATE({_sql_literal(month_anchor_date(start_date) if frequency == 'monthly' else start_date)})")
+        normalized_start = month_anchor_date(start_date) if frequency == "monthly" else start_date
+        clauses.append(f"{partition_expr} >= TO_DATE({_sql_literal(normalized_start)})")
     if end_date:
-        clauses.append(f"{partition_expr} <= TO_DATE({_sql_literal(month_anchor_date(end_date) if frequency == 'monthly' else end_date)})")
+        normalized_end = month_anchor_date(end_date) if frequency == "monthly" else end_date
+        clauses.append(f"{partition_expr} <= TO_DATE({_sql_literal(normalized_end)})")
     where_sql = " AND ".join(clauses)
     rows = session.sql(
         f"""
@@ -310,6 +435,8 @@ def raw_partitions_for_dataset(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> list[dict[str, Any]]:
+    if not table_exists(session, table_name):
+        return []
     return list_partition_status(
         session,
         table_name,

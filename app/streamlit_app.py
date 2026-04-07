@@ -9,7 +9,11 @@ from data_access import (
     get_daily_generation_coverage,
     get_demand_coverage,
     get_generation_coverage,
+    get_generation_zero_value_summary,
+    get_gold_coverage_summary,
     get_monthly_sales_coverage,
+    get_pipeline_state_summary,
+    get_raw_coverage_summary,
     qualified_table,
     SILVER_ELECTRICITY_RETAIL_SALES,
     table_has_rows,
@@ -135,6 +139,35 @@ else:
     cov_far.warning("No monthly sales data yet.")
 
 st.info(
-    "The normal refresh chain is eia_ingest -> eia_silver -> eia_gold. "
-    "For historical loads, trigger eia_ingest in Airflow with start_date and end_date."
+    "Ingest and transform now run as separate Airflow DAGs for hourly and monthly cadence groups. "
+    "Bootstrap can chain follow-up runs automatically until RAW and published history catch up."
 )
+
+st.subheader("Bootstrap diagnostics")
+diag_left, diag_right = st.columns(2)
+with diag_left:
+    try:
+        st.caption("Pipeline state")
+        st.dataframe(get_pipeline_state_summary(), use_container_width=True, hide_index=True)
+    except Exception as exc:
+        st.warning(f"Pipeline state unavailable: {exc}")
+with diag_right:
+    try:
+        st.caption("RAW coverage")
+        st.dataframe(get_raw_coverage_summary(), use_container_width=True, hide_index=True)
+    except Exception as exc:
+        st.warning(f"RAW coverage unavailable: {exc}")
+
+try:
+    st.caption("Published GOLD coverage")
+    st.dataframe(get_gold_coverage_summary(), use_container_width=True, hide_index=True)
+except Exception as exc:
+    st.warning(f"GOLD coverage unavailable: {exc}")
+
+try:
+    zero_summary = get_generation_zero_value_summary()
+    if zero_summary:
+        st.caption("Recent generation zero-value rows")
+        st.dataframe(zero_summary, use_container_width=True, hide_index=True)
+except Exception as exc:
+    st.warning(f"Generation zero-value diagnostics unavailable: {exc}")

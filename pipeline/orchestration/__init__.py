@@ -1,1 +1,1 @@
-"""Bronze-to-gold orchestration helpers."""
+"""Ingest and transform orchestration helpers."""

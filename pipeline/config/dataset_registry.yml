@@ -8,6 +8,8 @@ datasets:
     transform_enabled: true
     bootstrap_enabled: true
     bootstrap_start_date: "2025-01-01"
+    bootstrap_max_partitions_per_run: 90
+    bootstrap_priority: "latest_first"
     scheduled_ingest: true
     scheduled_transform: true
     repair_lookback_partitions: 7
@@ -48,6 +50,8 @@ datasets:
     transform_enabled: true
     bootstrap_enabled: true
     bootstrap_start_date: "2025-01-01"
+    bootstrap_max_partitions_per_run: 90
+    bootstrap_priority: "latest_first"
     scheduled_ingest: true
     scheduled_transform: true
     repair_lookback_partitions: 7
@@ -84,6 +88,8 @@ datasets:
     transform_enabled: true
     bootstrap_enabled: true
     bootstrap_start_date: "2023-01-01"
+    bootstrap_max_partitions_per_run: 36
+    bootstrap_priority: "latest_first"
     scheduled_ingest: true
     scheduled_transform: true
     repair_lookback_partitions: 3
@@ -122,6 +128,8 @@ datasets:
     transform_enabled: true
     bootstrap_enabled: true
     bootstrap_start_date: "2023-01-01"
+    bootstrap_max_partitions_per_run: 36
+    bootstrap_priority: "latest_first"
     scheduled_ingest: true
     scheduled_transform: true
     repair_lookback_partitions: 3

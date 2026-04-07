@@ -13,8 +13,6 @@ COPY app/data_access_summary.py .
 COPY app/data_access_generation.py .
 COPY app/data_access_demand.py .
 COPY app/data_access_sales.py .
-COPY app/data_access_operational.py .
-COPY app/data_access_operational_sales.py .
 COPY app/ui_utils.py .
 COPY app/respondent_geo.py .
 COPY app/streamlit_app.py .

@@ -5,5 +5,3 @@ from data_access_summary import *  # noqa: F403
 from data_access_generation import *  # noqa: F403
 from data_access_demand import *  # noqa: F403
 from data_access_sales import *  # noqa: F403
-from data_access_operational import *  # noqa: F403
-from data_access_operational_sales import *  # noqa: F403

@@ -12,11 +12,11 @@ from data_access_sales import (
     gold_table_has_rows,
 )
 SECTOR_COLORS = {
-    "COM": "#0d9488",  # teal
-    "IND": "#f97316",  # orange
-    "OTH": "#8b5cf6",  # purple
-    "RES": "#3b82f6",  # blue
-    "TRA": "#f43f5e",  # rose
+    "COM": "#74df84",  # teal
+    "IND": "#e96379",  # rose
+    "OTH": "#9c79ef",  # purple
+    "RES": "#5292b7",  # blue
+    "TRA": "#f3ad2b",  # orange
 }
 
 st.set_page_config(page_title="Monthly Sales Trends · EIA Analytics (Gold)", layout="wide")
@@ -46,7 +46,36 @@ df["YEAR"] = df["PERIOD"].dt.year
 df["MONTH"] = df["PERIOD"].dt.month
 df["YEAR_MONTH"] = df["PERIOD"].dt.strftime("%Y-%m")
 
-# ── Sidebar Filters ───────────────────────────────────────────────────────────
+# ── Expand Sidebar and Adjust Styling ─────────────────────────────
+st.markdown(
+    """
+    <style>
+    /* ── Sidebar width ── */
+    /* When expanded */
+    .css-1d391kg {  /* wrapper class for sidebar in Streamlit 1.25+ */
+        width: 320px;
+    }
+    /* When collapsed */
+    .css-1d391kg[aria-expanded="false"] {
+        width: 60px;
+    }
+
+    /* ── KPI Metrics Row ── */
+    .stMetric {
+        min-width: 180px !important;   /* prevents numbers/deltas from being cut */
+    }
+    .stMetric > div > div {
+        white-space: nowrap !important;  /* prevents wrapping */
+    }
+
+    /* ── General tweaks ── */
+    .css-1v3fvcr { max-width: 100% !important; } /* force container width for charts */
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ── Sidebar Filters ─────────────────────────────
 with st.sidebar:
     st.header("Filters")
 
@@ -54,12 +83,7 @@ with st.sidebar:
     min_date = coverage["min_period"].to_pydatetime()
     max_date = coverage["max_period"].to_pydatetime()
 
-    date_range = st.date_input(
-        "Date range",
-        value=(min_date, max_date),
-        min_value=min_date,
-        max_value=max_date,
-    )
+    # Date picker now has full sidebar width
 
     all_sectors = sorted(df["SECTORNAME"].unique())
     selected_sectors = st.multiselect(
@@ -84,6 +108,12 @@ with st.sidebar:
             "PRICE": "Avg Price (cents/kWh)",
             "CUSTOMERS": "Customers",
         }[m],
+    )
+    date_range = st.date_input(
+        "Date range",
+        value=(min_date, max_date),
+        min_value=min_date,
+        max_value=max_date,
     )
 
     st.divider()
@@ -125,9 +155,9 @@ METRIC_TICK_FORMAT = {
 }
 tick_fmt = METRIC_TICK_FORMAT[metric]
 
-# ── KPI row ───────────────────────────────────────────────────────────────────
+# ── KPI row ─────────────────────────────
 st.subheader("Summary")
-kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+kpi1, kpi2, kpi3, kpi4 = st.columns([2, 1.5, 1.5, 2])
 
 total_sales = fdf["SALES"].sum()
 total_revenue = fdf["REVENUE"].sum()
@@ -144,14 +174,24 @@ kpi2.metric("Total Revenue", f"${total_revenue:,.0f} M")
 kpi3.metric("Avg Retail Price", f"{avg_price:.2f} ¢/kWh")
 kpi4.metric("Avg Monthly Customers", f"{total_customers:,.0f}")
 
-st.divider()
-
 # ── Monthly Trends by Sector ─────────────────────────────────────────────────
 st.subheader("Monthly Trends by Sector")
 if metric != "PRICE":
     monthly_sector = fdf.groupby(["PERIOD", "SECTORNAME"])[metric].sum().reset_index()
 else:
     monthly_sector = fdf.groupby(["PERIOD", "SECTORNAME"])[metric].mean().reset_index()
+
+# Sort sectors by total value so smallest is drawn on top
+sector_order = (
+    monthly_sector.groupby("SECTORNAME")[metric]
+    .sum()
+    .sort_values(ascending=False)
+    .index.tolist()
+)
+monthly_sector["SECTORNAME"] = pd.Categorical(
+    monthly_sector["SECTORNAME"], categories=sector_order, ordered=True
+)
+monthly_sector = monthly_sector.sort_values(["PERIOD", "SECTORNAME"])
 
 fig_line = px.line(
     monthly_sector,
@@ -163,13 +203,29 @@ fig_line = px.line(
     title=f"Monthly {metric_label} by Sector",
     labels={"PERIOD": "Month", metric: metric_label, "SECTORNAME": "Sector"},
     template="plotly_white",
+    category_orders={"SECTORNAME": sector_order},
 )
-# Fill under lines
-for trace in fig_line.data:
-    r, g, b = int(trace.line.color[1:3], 16), int(trace.line.color[3:5], 16), int(trace.line.color[5:7], 16)
-    trace.update(fill="tozeroy", fillcolor=f"rgba({r},{g},{b},0.15)", line_width=2, marker_size=5)
-fig_line.update_layout(legend_title_text="Sector", height=380,
-                       yaxis=dict(tickprefix=tick_fmt["tickprefix"], ticksuffix=tick_fmt["ticksuffix"]))
+
+# First trace fills to zero, rest fill to next trace
+for i, trace in enumerate(fig_line.data):
+    hex_color = SECTOR_COLORS.get(trace.name, "#888888")
+    r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
+    fill_type = "tozeroy" if i == len(fig_line.data) - 1 else "tonexty"
+    trace.update(
+        fill="tozeroy",
+        fillcolor=f"rgba({r},{g},{b},0.45)",
+        line_width=2,
+        marker_size=5,
+    )
+
+fig_line.update_layout(
+    legend_title_text="Sector",
+    height=380,
+    yaxis=dict(
+        tickprefix=tick_fmt["tickprefix"],
+        ticksuffix=tick_fmt["ticksuffix"],
+    ),
+)
 st.plotly_chart(fig_line, use_container_width=True)
 
 # ── Market Share Pie Chart ───────────────────────────────────────────────────

@@ -241,7 +241,7 @@ if not over_df.empty:
             orientation="h",
             color_discrete_sequence=["#c76d1f"],
             labels={"forecast_error_gwh": "Error (GWh)", "ba_code": "BA"},
-            title="Largest over-runs",
+            title="Largest demand over-runs (actual > forecast)",
         ),
         use_container_width=True,
     )
@@ -257,7 +257,7 @@ if not under_df.empty:
             orientation="h",
             color_discrete_sequence=["#2563eb"],
             labels={"forecast_error_gwh": "Error (GWh)", "ba_code": "BA"},
-            title="Largest under-runs",
+            title="Largest demand under-runs (actual < forecast)",
         ),
         use_container_width=True,
     )
@@ -268,7 +268,8 @@ focus_options = sorted(hourly_df["ba_code"].dropna().unique().tolist())
 focus_ba = st.selectbox("Focus balancing authority", focus_options, index=0)
 focus_df = hourly_df[hourly_df["ba_code"] == focus_ba].copy().sort_values("period_ts")
 
-st.subheader(f"Focus BA: {focus_ba}")
+st.subheader(f"Trends — {focus_ba}")
+st.caption("Hourly demand vs forecast and forecast error for the selected BA.")
 focus_left, focus_right = st.columns(2)
 
 if not focus_df.empty:
@@ -326,6 +327,20 @@ if not focus_df.empty:
                 yaxis="y2",
             )
         )
+        error_fig.add_hline(
+            y=2.0,
+            line_dash="dot",
+            line_color="#E24B4A",
+            annotation_text="+2σ",
+            yref="y2",
+        )
+        error_fig.add_hline(
+            y=-2.0,
+            line_dash="dot",
+            line_color="#E24B4A",
+            annotation_text="-2σ",
+            yref="y2",
+        )
         error_fig.update_layout(
             title="Forecast error and volatility",
             yaxis=dict(title="Error (GWh)"),
@@ -374,6 +389,7 @@ with st.expander("Supporting analysis", expanded=False):
                 lon="lon",
                 color="forecast_error_pct",
                 size="demand_gwh",
+                size_max=50,
                 hover_name="ba_code",
                 hover_data={
                     "ba_name": True,

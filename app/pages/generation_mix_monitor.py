@@ -277,6 +277,7 @@ with st.expander("Supporting analysis", expanded=False):
                 lon="lon",
                 color="renewable_pct",
                 size="total_gwh",
+                size_max=50,
                 hover_name="ba_code",
                 hover_data={
                     "ba_name": True,

@@ -11,197 +11,197 @@ sources:
           - dbt_utils.unique_combination_of_columns:
               combination_of_columns: [record_id]
               config:
-                tags: ["hourly_gold"]
+                tags: ["hourly_gold", "hourly_generation"]
           - dbt_utils.unique_combination_of_columns:
               combination_of_columns: [period_ts, ba_code, fuel_code, partition_date]
               config:
-                tags: ["hourly_gold"]
+                tags: ["hourly_gold", "hourly_generation"]
         columns:
           - name: record_id
             tests:
               - not_null:
                   config:
-                    tags: ["hourly_gold"]
+                    tags: ["hourly_gold", "hourly_generation"]
           - name: period_ts
             tests:
               - not_null:
                   config:
-                    tags: ["hourly_gold"]
+                    tags: ["hourly_gold", "hourly_generation"]
           - name: ba_code
             tests:
               - not_null:
                   config:
-                    tags: ["hourly_gold"]
+                    tags: ["hourly_gold", "hourly_generation"]
           - name: fuel_code
             tests:
               - not_null:
                   config:
-                    tags: ["hourly_gold"]
+                    tags: ["hourly_gold", "hourly_generation"]
           - name: partition_date
             tests:
               - not_null:
                   config:
-                    tags: ["hourly_gold"]
+                    tags: ["hourly_gold", "hourly_generation"]
           - name: generation_gwh
             tests:
               - non_negative:
                   config:
-                    tags: ["hourly_gold"]
+                    tags: ["hourly_gold", "hourly_generation"]
       - name: FACT_DEMAND_HOURLY
         tests:
           - dbt_utils.unique_combination_of_columns:
               combination_of_columns: [record_id]
               config:
-                tags: ["hourly_gold"]
+                tags: ["hourly_gold", "hourly_demand"]
           - dbt_utils.unique_combination_of_columns:
               combination_of_columns: [period_ts, ba_code, partition_date]
               config:
-                tags: ["hourly_gold"]
+                tags: ["hourly_gold", "hourly_demand"]
         columns:
           - name: record_id
             tests:
               - not_null:
                   config:
-                    tags: ["hourly_gold"]
+                    tags: ["hourly_gold", "hourly_demand"]
           - name: period_ts
             tests:
               - not_null:
                   config:
-                    tags: ["hourly_gold"]
+                    tags: ["hourly_gold", "hourly_demand"]
           - name: ba_code
             tests:
               - not_null:
                   config:
-                    tags: ["hourly_gold"]
+                    tags: ["hourly_gold", "hourly_demand"]
           - name: partition_date
             tests:
               - not_null:
                   config:
-                    tags: ["hourly_gold"]
+                    tags: ["hourly_gold", "hourly_demand"]
           - name: demand_gwh
             tests:
               - non_negative:
                   config:
-                    tags: ["hourly_gold"]
+                    tags: ["hourly_gold", "hourly_demand"]
           - name: forecast_gwh
             tests:
               - non_negative:
                   config:
                     severity: warn
                     where: "forecast_gwh is not null"
-                    tags: ["hourly_gold"]
+                    tags: ["hourly_gold", "hourly_demand"]
       - name: AGG_DAILY_GENERATION
         columns:
           - name: partition_date
             tests:
               - not_null:
                   config:
-                    tags: ["hourly_gold"]
+                    tags: ["hourly_gold", "hourly_generation"]
           - name: total_gwh
             tests:
               - non_negative:
                   config:
-                    tags: ["hourly_gold"]
+                    tags: ["hourly_gold", "hourly_generation"]
       - name: AGG_DAILY_DEMAND_PEAK
         columns:
           - name: partition_date
             tests:
               - not_null:
                   config:
-                    tags: ["hourly_gold"]
+                    tags: ["hourly_gold", "hourly_demand"]
           - name: peak_gwh
             tests:
               - non_negative:
                   config:
-                    tags: ["hourly_gold"]
+                    tags: ["hourly_gold", "hourly_demand"]
       - name: DIM_BALANCING_AUTHORITY
         tests:
           - dbt_utils.unique_combination_of_columns:
               combination_of_columns: [ba_code]
               config:
-                tags: ["hourly_gold"]
+                tags: ["hourly_gold", "hourly_generation", "hourly_demand"]
         columns:
           - name: ba_code
             tests:
               - not_null:
                   config:
-                    tags: ["hourly_gold"]
+                    tags: ["hourly_gold", "hourly_generation", "hourly_demand"]
       - name: DIM_FUEL_TYPE
         tests:
           - dbt_utils.unique_combination_of_columns:
               combination_of_columns: [fuel_code]
               config:
-                tags: ["hourly_gold"]
+                tags: ["hourly_gold", "hourly_generation"]
         columns:
           - name: fuel_code
             tests:
               - not_null:
                   config:
-                    tags: ["hourly_gold"]
+                    tags: ["hourly_gold", "hourly_generation"]
       - name: GOLD_ELECTRICITY_OPERATIONAL_SALES
         tests:
           - dbt_utils.unique_combination_of_columns:
               combination_of_columns: [record_id]
               config:
-                tags: ["monthly_gold"]
+                tags: ["monthly_gold", "monthly_operational_sales"]
           - dbt_utils.unique_combination_of_columns:
               combination_of_columns: [period, state_id, sector_abbr, partition_date]
               config:
-                tags: ["monthly_gold"]
+                tags: ["monthly_gold", "monthly_operational_sales"]
         columns:
           - name: record_id
             tests:
               - not_null:
                   config:
-                    tags: ["monthly_gold"]
+                    tags: ["monthly_gold", "monthly_operational_sales"]
           - name: period
             tests:
               - not_null:
                   config:
-                    tags: ["monthly_gold"]
+                    tags: ["monthly_gold", "monthly_operational_sales"]
           - name: state_id
             tests:
               - not_null:
                   config:
-                    tags: ["monthly_gold"]
+                    tags: ["monthly_gold", "monthly_operational_sales"]
           - name: sector_abbr
             tests:
               - not_null:
                   config:
-                    tags: ["monthly_gold"]
+                    tags: ["monthly_gold", "monthly_operational_sales"]
           - name: partition_date
             tests:
               - not_null:
                   config:
-                    tags: ["monthly_gold"]
+                    tags: ["monthly_gold", "monthly_operational_sales"]
           - name: customers
             tests:
               - non_negative:
                   config:
                     severity: warn
                     where: "customers is not null"
-                    tags: ["monthly_gold"]
+                    tags: ["monthly_gold", "monthly_operational_sales"]
           - name: price
             tests:
               - non_negative:
                   config:
                     severity: warn
                     where: "price is not null"
-                    tags: ["monthly_gold"]
+                    tags: ["monthly_gold", "monthly_operational_sales"]
           - name: revenue
             tests:
               - non_negative:
                   config:
                     severity: warn
                     where: "revenue is not null"
-                    tags: ["monthly_gold"]
+                    tags: ["monthly_gold", "monthly_operational_sales"]
           - name: sales
             tests:
               - non_negative:
                   config:
                     severity: warn
                     where: "sales is not null"
-                    tags: ["monthly_gold"]
+                    tags: ["monthly_gold", "monthly_operational_sales"]
           - name: fossil_pct
             tests:
               - value_between:
@@ -209,7 +209,7 @@ sources:
                   max_value: 100
                   config:
                     severity: warn
-                    tags: ["monthly_gold"]
+                    tags: ["monthly_gold", "monthly_operational_sales"]
           - name: renewable_pct
             tests:
               - value_between:
@@ -217,7 +217,7 @@ sources:
                   max_value: 100
                   config:
                     severity: warn
-                    tags: ["monthly_gold"]
+                    tags: ["monthly_gold", "monthly_operational_sales"]
           - name: nuclear_pct
             tests:
               - value_between:
@@ -225,4 +225,4 @@ sources:
                   max_value: 100
                   config:
                     severity: warn
-                    tags: ["monthly_gold"]
+                    tags: ["monthly_gold", "monthly_operational_sales"]

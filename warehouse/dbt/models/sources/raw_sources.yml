@@ -13,7 +13,7 @@ sources:
           freshness:
             warn_after: {count: 3, period: hour}
             error_after: {count: 6, period: hour}
-          tags: ["freshness_hourly_raw"]
+          tags: ["freshness_hourly_raw", "freshness_hourly_generation"]
       - name: ELECTRICITY_DEMAND_RAW
         description: Hourly demand raw feed.
         config:
@@ -21,7 +21,7 @@ sources:
           freshness:
             warn_after: {count: 3, period: hour}
             error_after: {count: 6, period: hour}
-          tags: ["freshness_hourly_raw"]
+          tags: ["freshness_hourly_raw", "freshness_hourly_demand"]
       - name: ELECTRICITY_RETAIL_SALES_RAW
         description: Monthly retail sales raw feed.
         config:
@@ -29,7 +29,7 @@ sources:
           freshness:
             warn_after: {count: 35, period: day}
             error_after: {count: 45, period: day}
-          tags: ["freshness_monthly_raw"]
+          tags: ["freshness_monthly_raw", "freshness_monthly_retail_sales"]
       - name: ELECTRICITY_POWER_OPERATIONAL_RAW
         description: Monthly electric power operational raw feed.
         config:
@@ -37,4 +37,4 @@ sources:
           freshness:
             warn_after: {count: 35, period: day}
             error_after: {count: 45, period: day}
-          tags: ["freshness_monthly_raw"]
+          tags: ["freshness_monthly_raw", "freshness_monthly_power_operational"]

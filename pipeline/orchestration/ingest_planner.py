@@ -70,7 +70,7 @@ def plan_ingest_windows(
                 start_date=bootstrap_start,
                 end_date=latest_target_partition,
             )
-            if item["partition_date"]
+            if item["partition_date"] and bool(item.get("is_complete", True))
         }
         expected = enumerate_partitions(bootstrap_start, latest_target_partition, frequency=frequency)
         missing = [partition for partition in expected if partition not in existing]

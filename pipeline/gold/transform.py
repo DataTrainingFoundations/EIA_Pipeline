@@ -353,9 +353,9 @@ def _build_monthly_operational_sales(session, database: str, target_date: str, g
             lit(partition_date).alias("partition_date"),
         )
     )
-    monthly_table = _gold_table(database, gold_tables["gold_electricity_operational_sales"])
+    monthly_table = _gold_table(database, gold_tables["fact_sales_monthly"])
     return {
-        "gold_electricity_operational_sales": _write_partitioned_table(session, combined, monthly_table, partition_date)
+        "fact_sales_monthly": _write_partitioned_table(session, combined, monthly_table, partition_date)
     }
 
 

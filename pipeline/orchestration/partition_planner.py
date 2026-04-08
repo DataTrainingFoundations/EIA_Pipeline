@@ -60,7 +60,7 @@ def _gold_freshness(
         )
         target_table = f"{database}.GOLD.{gold_tables[target_name]}"
     else:
-        target_table = f"{database}.GOLD.{gold_tables['gold_electricity_operational_sales']}"
+        target_table = f"{database}.GOLD.{gold_tables['fact_sales_monthly']}"
     return pipeline_partitions_for_table(
         session,
         target_table,

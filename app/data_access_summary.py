@@ -12,7 +12,7 @@ from data_access_shared import (
     DIM_FUEL_TYPE,
     FACT_DEMAND_HOURLY,
     FACT_GENERATION_HOURLY,
-    GOLD_ELECTRICITY_OPERATIONAL_SALES,
+    FACT_SALES_MONTHLY,
     SILVER_ELECTRICITY_RETAIL_SALES,
     _safe_read_sql,
     qualified_table,
@@ -20,7 +20,7 @@ from data_access_shared import (
 )
 
 MONTHLY_SALES_TABLE = qualified_table("SILVER", SILVER_ELECTRICITY_RETAIL_SALES)
-MONTHLY_GOLD_TABLE = qualified_table("GOLD", GOLD_ELECTRICITY_OPERATIONAL_SALES)
+MONTHLY_GOLD_TABLE = qualified_table("GOLD", FACT_SALES_MONTHLY)
 RAW_GENERATION_TABLE = qualified_table("RAW", "ELECTRICITY_GENERATION_RAW")
 RAW_DEMAND_TABLE = qualified_table("RAW", "ELECTRICITY_DEMAND_RAW")
 RAW_RETAIL_TABLE = qualified_table("RAW", "ELECTRICITY_RETAIL_SALES_RAW")
@@ -136,7 +136,7 @@ def get_gold_coverage_summary() -> list[dict[str, Any]]:
     union all
     select 'agg_daily_generation' as table_name, min(report_date) as min_partition, max(report_date) as max_partition, count(*) as row_count from {AGG_DAILY_GENERATION}
     union all
-    select 'gold_electricity_operational_sales' as table_name, min(partition_date) as min_partition, max(partition_date) as max_partition, count(*) as row_count from {MONTHLY_GOLD_TABLE}
+    select 'fact_sales_monthly' as table_name, min(partition_date) as min_partition, max(partition_date) as max_partition, count(*) as row_count from {MONTHLY_GOLD_TABLE}
     order by table_name
     """
     return _safe_read_sql(query).to_dict("records")

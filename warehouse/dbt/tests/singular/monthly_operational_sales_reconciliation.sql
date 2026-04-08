@@ -76,8 +76,8 @@ gold_actual as (
         round(renewable_pct, 2) as renewable_pct,
         round(nuclear_pct, 2) as nuclear_pct,
         partition_date
-    from {{ source('gold', 'GOLD_ELECTRICITY_OPERATIONAL_SALES') }}
-    where {{ eia_source_partition_predicate('gold', 'GOLD_ELECTRICITY_OPERATIONAL_SALES') }}
+    from {{ source('gold', 'FACT_SALES_MONTHLY') }}
+    where {{ eia_source_partition_predicate('gold', 'FACT_SALES_MONTHLY') }}
 )
 select
     coalesce(e.period, g.period) as period,

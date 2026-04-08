@@ -138,7 +138,7 @@ sources:
               - not_null:
                   config:
                     tags: ["hourly_gold", "hourly_generation"]
-      - name: GOLD_ELECTRICITY_OPERATIONAL_SALES
+      - name: FACT_SALES_MONTHLY
         tests:
           - dbt_utils.unique_combination_of_columns:
               combination_of_columns: [record_id]

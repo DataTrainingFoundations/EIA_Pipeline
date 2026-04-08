@@ -71,3 +71,30 @@ def test_transform_planner_excludes_incomplete_historical_hourly_raw_partition(m
 
     assert "2026-04-01" not in plan.planned_partitions
     assert plan.planned_partitions == ["2026-04-02"]
+
+
+def test_transform_planner_monthly_gold_freshness_targets_fact_sales_monthly(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    def _capture_table(session, table_name, **kwargs):
+        captured["table_name"] = table_name
+        return {}
+
+    monkeypatch.setattr(
+        partition_planner,
+        "pipeline_partitions_for_table",
+        _capture_table,
+    )
+
+    result = partition_planner._gold_freshness(
+        None,
+        "EIA_PIPELINE",
+        dataset_id="electricity_retail_sales_monthly",
+        frequency="monthly",
+        cadence_group="monthly",
+        start_date="2026-04-01",
+        end_date="2026-04-01",
+    )
+
+    assert result == {}
+    assert captured["table_name"] == "EIA_PIPELINE.GOLD.FACT_SALES_MONTHLY"

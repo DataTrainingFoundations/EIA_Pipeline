@@ -22,5 +22,5 @@ def test_gold_table_names_remain_stable() -> None:
         "fact_demand_hourly": "FACT_DEMAND_HOURLY",
         "agg_daily_generation": "AGG_DAILY_GENERATION",
         "agg_daily_demand_peak": "AGG_DAILY_DEMAND_PEAK",
-        "gold_electricity_operational_sales": "GOLD_ELECTRICITY_OPERATIONAL_SALES",
+        "fact_sales_monthly": "FACT_SALES_MONTHLY",
     }

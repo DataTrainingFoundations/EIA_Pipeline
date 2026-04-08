@@ -1,0 +1,228 @@
+version: 2
+
+sources:
+  - name: gold
+    description: Curated Snowflake gold serving tables.
+    database: "{{ env_var('DBT_SNOWFLAKE_DATABASE', env_var('SNOWFLAKE_DATABASE', 'EIA_PIPELINE')) }}"
+    schema: GOLD
+    tables:
+      - name: FACT_GENERATION_HOURLY
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              combination_of_columns: [record_id]
+              config:
+                tags: ["hourly_gold"]
+          - dbt_utils.unique_combination_of_columns:
+              combination_of_columns: [period_ts, ba_code, fuel_code, partition_date]
+              config:
+                tags: ["hourly_gold"]
+        columns:
+          - name: record_id
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_gold"]
+          - name: period_ts
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_gold"]
+          - name: ba_code
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_gold"]
+          - name: fuel_code
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_gold"]
+          - name: partition_date
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_gold"]
+          - name: generation_gwh
+            tests:
+              - non_negative:
+                  config:
+                    tags: ["hourly_gold"]
+      - name: FACT_DEMAND_HOURLY
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              combination_of_columns: [record_id]
+              config:
+                tags: ["hourly_gold"]
+          - dbt_utils.unique_combination_of_columns:
+              combination_of_columns: [period_ts, ba_code, partition_date]
+              config:
+                tags: ["hourly_gold"]
+        columns:
+          - name: record_id
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_gold"]
+          - name: period_ts
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_gold"]
+          - name: ba_code
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_gold"]
+          - name: partition_date
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_gold"]
+          - name: demand_gwh
+            tests:
+              - non_negative:
+                  config:
+                    tags: ["hourly_gold"]
+          - name: forecast_gwh
+            tests:
+              - non_negative:
+                  config:
+                    severity: warn
+                    where: "forecast_gwh is not null"
+                    tags: ["hourly_gold"]
+      - name: AGG_DAILY_GENERATION
+        columns:
+          - name: partition_date
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_gold"]
+          - name: total_gwh
+            tests:
+              - non_negative:
+                  config:
+                    tags: ["hourly_gold"]
+      - name: AGG_DAILY_DEMAND_PEAK
+        columns:
+          - name: partition_date
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_gold"]
+          - name: peak_gwh
+            tests:
+              - non_negative:
+                  config:
+                    tags: ["hourly_gold"]
+      - name: DIM_BALANCING_AUTHORITY
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              combination_of_columns: [ba_code]
+              config:
+                tags: ["hourly_gold"]
+        columns:
+          - name: ba_code
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_gold"]
+      - name: DIM_FUEL_TYPE
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              combination_of_columns: [fuel_code]
+              config:
+                tags: ["hourly_gold"]
+        columns:
+          - name: fuel_code
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_gold"]
+      - name: GOLD_ELECTRICITY_OPERATIONAL_SALES
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              combination_of_columns: [record_id]
+              config:
+                tags: ["monthly_gold"]
+          - dbt_utils.unique_combination_of_columns:
+              combination_of_columns: [period, state_id, sector_abbr, partition_date]
+              config:
+                tags: ["monthly_gold"]
+        columns:
+          - name: record_id
+            tests:
+              - not_null:
+                  config:
+                    tags: ["monthly_gold"]
+          - name: period
+            tests:
+              - not_null:
+                  config:
+                    tags: ["monthly_gold"]
+          - name: state_id
+            tests:
+              - not_null:
+                  config:
+                    tags: ["monthly_gold"]
+          - name: sector_abbr
+            tests:
+              - not_null:
+                  config:
+                    tags: ["monthly_gold"]
+          - name: partition_date
+            tests:
+              - not_null:
+                  config:
+                    tags: ["monthly_gold"]
+          - name: customers
+            tests:
+              - non_negative:
+                  config:
+                    severity: warn
+                    where: "customers is not null"
+                    tags: ["monthly_gold"]
+          - name: price
+            tests:
+              - non_negative:
+                  config:
+                    severity: warn
+                    where: "price is not null"
+                    tags: ["monthly_gold"]
+          - name: revenue
+            tests:
+              - non_negative:
+                  config:
+                    severity: warn
+                    where: "revenue is not null"
+                    tags: ["monthly_gold"]
+          - name: sales
+            tests:
+              - non_negative:
+                  config:
+                    severity: warn
+                    where: "sales is not null"
+                    tags: ["monthly_gold"]
+          - name: fossil_pct
+            tests:
+              - value_between:
+                  min_value: 0
+                  max_value: 100
+                  config:
+                    severity: warn
+                    tags: ["monthly_gold"]
+          - name: renewable_pct
+            tests:
+              - value_between:
+                  min_value: 0
+                  max_value: 100
+                  config:
+                    severity: warn
+                    tags: ["monthly_gold"]
+          - name: nuclear_pct
+            tests:
+              - value_between:
+                  min_value: 0
+                  max_value: 100
+                  config:
+                    severity: warn
+                    tags: ["monthly_gold"]

@@ -1,0 +1,13 @@
+eia_pipeline:
+  target: default
+  outputs:
+    default:
+      type: snowflake
+      account: "{{ env_var('DBT_SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('DBT_SNOWFLAKE_USER') }}"
+      password: "{{ env_var('DBT_SNOWFLAKE_PASSWORD') }}"
+      role: "{{ env_var('DBT_SNOWFLAKE_ROLE', 'SYSADMIN') }}"
+      warehouse: "{{ env_var('DBT_SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH') }}"
+      database: "{{ env_var('DBT_SNOWFLAKE_DATABASE', 'EIA_PIPELINE') }}"
+      schema: "{{ env_var('DBT_SNOWFLAKE_SCHEMA', 'GOLD') }}"
+      threads: "{{ env_var('DBT_THREADS', '4') | int }}"

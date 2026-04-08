@@ -28,3 +28,8 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# dbt
+warehouse/dbt/target/
+warehouse/dbt/dbt_packages/
+warehouse/dbt/logs/

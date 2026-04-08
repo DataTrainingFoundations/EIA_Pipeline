@@ -1,0 +1,183 @@
+version: 2
+
+sources:
+  - name: silver
+    description: Cleaned and deduplicated Snowflake silver tables.
+    database: "{{ env_var('DBT_SNOWFLAKE_DATABASE', env_var('SNOWFLAKE_DATABASE', 'EIA_PIPELINE')) }}"
+    schema: SILVER
+    tables:
+      - name: SILVER_ELECTRICITY_GENERATION
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              combination_of_columns: [period, respondent, fueltype, partition_date]
+              config:
+                tags: ["hourly_silver"]
+        columns:
+          - name: partition_date
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_silver"]
+          - name: period
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_silver"]
+          - name: respondent
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_silver"]
+          - name: fueltype
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_silver"]
+              - accepted_values:
+                  values: ["NG", "COL", "NUC", "WND", "SUN", "WAT"]
+                  config:
+                    tags: ["hourly_silver"]
+          - name: value
+            tests:
+              - non_negative:
+                  config:
+                    tags: ["hourly_silver"]
+          - name: value_gwh
+            tests:
+              - non_negative:
+                  config:
+                    tags: ["hourly_silver"]
+      - name: SILVER_ELECTRICITY_DEMAND
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              combination_of_columns: [period, respondent, type, partition_date]
+              config:
+                tags: ["hourly_silver"]
+        columns:
+          - name: partition_date
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_silver"]
+          - name: period
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_silver"]
+          - name: respondent
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_silver"]
+          - name: type
+            tests:
+              - not_null:
+                  config:
+                    tags: ["hourly_silver"]
+              - accepted_values:
+                  values: ["D", "DF"]
+                  config:
+                    tags: ["hourly_silver"]
+          - name: value
+            tests:
+              - non_negative:
+                  config:
+                    tags: ["hourly_silver"]
+          - name: value_gwh
+            tests:
+              - non_negative:
+                  config:
+                    tags: ["hourly_silver"]
+      - name: SILVER_ELECTRICITY_RETAIL_SALES
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              combination_of_columns: [period, state_id, sector_abbr, partition_date]
+              config:
+                tags: ["monthly_silver"]
+        columns:
+          - name: partition_date
+            tests:
+              - not_null:
+                  config:
+                    tags: ["monthly_silver"]
+          - name: period
+            tests:
+              - not_null:
+                  config:
+                    tags: ["monthly_silver"]
+          - name: state_id
+            tests:
+              - not_null:
+                  config:
+                    tags: ["monthly_silver"]
+          - name: sector_abbr
+            tests:
+              - not_null:
+                  config:
+                    tags: ["monthly_silver"]
+          - name: customers
+            tests:
+              - non_negative:
+                  config:
+                    severity: warn
+                    tags: ["monthly_silver"]
+          - name: price
+            tests:
+              - non_negative:
+                  config:
+                    severity: warn
+                    tags: ["monthly_silver"]
+          - name: revenue
+            tests:
+              - non_negative:
+                  config:
+                    severity: warn
+                    tags: ["monthly_silver"]
+          - name: sales
+            tests:
+              - non_negative:
+                  config:
+                    severity: warn
+                    tags: ["monthly_silver"]
+      - name: SILVER_ELECTRICITY_POWER_OPERATIONAL_DATA
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              combination_of_columns: [period, state_id, sector_id, fuel_type_id, partition_date]
+              config:
+                tags: ["monthly_silver"]
+        columns:
+          - name: partition_date
+            tests:
+              - not_null:
+                  config:
+                    tags: ["monthly_silver"]
+          - name: period
+            tests:
+              - not_null:
+                  config:
+                    tags: ["monthly_silver"]
+          - name: state_id
+            tests:
+              - not_null:
+                  config:
+                    tags: ["monthly_silver"]
+          - name: sector_id
+            tests:
+              - not_null:
+                  config:
+                    tags: ["monthly_silver"]
+          - name: fuel_type_id
+            tests:
+              - not_null:
+                  config:
+                    tags: ["monthly_silver"]
+              - accepted_values:
+                  values: ["NG", "COL", "NUC", "SUN", "WND", "WAT"]
+                  config:
+                    tags: ["monthly_silver"]
+          - name: generation
+            tests:
+              - non_negative:
+                  config:
+                    severity: warn
+                    tags: ["monthly_silver"]

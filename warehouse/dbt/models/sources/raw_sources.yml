@@ -1,0 +1,40 @@
+version: 2
+
+sources:
+  - name: raw
+    description: EIA source-faithful Snowflake raw tables.
+    database: "{{ env_var('DBT_SNOWFLAKE_DATABASE', env_var('SNOWFLAKE_DATABASE', 'EIA_PIPELINE')) }}"
+    schema: RAW
+    tables:
+      - name: ELECTRICITY_GENERATION_RAW
+        description: Hourly generation raw feed.
+        config:
+          loaded_at_field: "TO_TIMESTAMP_NTZ(_INGESTED_AT)"
+          freshness:
+            warn_after: {count: 3, period: hour}
+            error_after: {count: 6, period: hour}
+          tags: ["freshness_hourly_raw"]
+      - name: ELECTRICITY_DEMAND_RAW
+        description: Hourly demand raw feed.
+        config:
+          loaded_at_field: "TO_TIMESTAMP_NTZ(_INGESTED_AT)"
+          freshness:
+            warn_after: {count: 3, period: hour}
+            error_after: {count: 6, period: hour}
+          tags: ["freshness_hourly_raw"]
+      - name: ELECTRICITY_RETAIL_SALES_RAW
+        description: Monthly retail sales raw feed.
+        config:
+          loaded_at_field: "TO_TIMESTAMP_NTZ(_INGESTED_AT)"
+          freshness:
+            warn_after: {count: 35, period: day}
+            error_after: {count: 45, period: day}
+          tags: ["freshness_monthly_raw"]
+      - name: ELECTRICITY_POWER_OPERATIONAL_RAW
+        description: Monthly electric power operational raw feed.
+        config:
+          loaded_at_field: "TO_TIMESTAMP_NTZ(_INGESTED_AT)"
+          freshness:
+            warn_after: {count: 35, period: day}
+            error_after: {count: 45, period: day}
+          tags: ["freshness_monthly_raw"]

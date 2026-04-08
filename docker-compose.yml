@@ -83,11 +83,23 @@ services:
       SNOWFLAKE_WAREHOUSE: ${SNOWFLAKE_WAREHOUSE}
       SNOWFLAKE_DATABASE: ${SNOWFLAKE_DATABASE}
       SNOWFLAKE_SCHEMA: ${SNOWFLAKE_SCHEMA}
+      DBT_SNOWFLAKE_ACCOUNT: ${DBT_SNOWFLAKE_ACCOUNT}
+      DBT_SNOWFLAKE_USER: ${DBT_SNOWFLAKE_USER}
+      DBT_SNOWFLAKE_PASSWORD: ${DBT_SNOWFLAKE_PASSWORD}
+      DBT_SNOWFLAKE_ROLE: ${DBT_SNOWFLAKE_ROLE:-SYSADMIN}
+      DBT_SNOWFLAKE_WAREHOUSE: ${DBT_SNOWFLAKE_WAREHOUSE:-COMPUTE_WH}
+      DBT_SNOWFLAKE_DATABASE: ${DBT_SNOWFLAKE_DATABASE:-EIA_PIPELINE}
+      DBT_SNOWFLAKE_SCHEMA: ${DBT_SNOWFLAKE_SCHEMA:-GOLD}
+      DBT_TARGET: ${DBT_TARGET:-default}
+      DBT_THREADS: ${DBT_THREADS:-4}
+      DBT_PROJECT_DIR: ${DBT_PROJECT_DIR:-/opt/airflow/warehouse/dbt}
+      DBT_PROFILES_DIR: ${DBT_PROFILES_DIR:-}
     ports:
       - "28080:8080"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./pipeline:/opt/airflow/pipeline
+      - ./warehouse:/opt/airflow/warehouse
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health > /dev/null"]
       interval: 10s

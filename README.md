@@ -4,7 +4,7 @@ This branch targets a Snowflake-first ELT architecture for EIA electricity data.
 
 Target flow:
 
-`EIA API -> Snowflake RAW -> Snowflake SILVER -> Snowflake GOLD -> dbt tests -> Streamlit`
+`EIA API -> Snowflake RAW -> Snowflake SILVER -> Snowflake GOLD -> dbt validation -> Streamlit`
 
 Runtime layout:
 
@@ -14,6 +14,7 @@ Runtime layout:
 - `pipeline/silver`: RAW to SILVER transforms
 - `pipeline/gold`: SILVER to GOLD transforms and the gold CLI entrypoint
 - `pipeline/orchestration`: separate ingest and transform planning/runtime helpers
+- `warehouse/dbt`: dbt source declarations, freshness checks, schema tests, selectors, and reconciliation tests
 
 Airflow runtime:
 
@@ -54,6 +55,7 @@ CREATE SCHEMA IF NOT EXISTS EIA_PIPELINE.META;
 
 Fill in the Snowflake variables in `.env`.
 The local Airflow metadata database uses the `POSTGRES_*` values from `.env`.
+Fill in the `DBT_*` variables in `.env` for warehouse validation.
 
 ## Start
 
@@ -74,12 +76,21 @@ docker compose exec airflow airflow users reset-password --username admin --pass
 
 Streamlit: `http://localhost:28501`
 
+Manual dbt validation:
+
+```bash
+cd warehouse/dbt
+dbt deps
+dbt source freshness --selector freshness_hourly_raw
+dbt test --selector hourly_full_validation
+```
+
 ## Notes
 
 - The active local runtime is `airflow`, `airflow-db`, `app`, and the optional standalone `ingestion` service backed by `pipeline/ingestion`.
 - All substantive pipeline logic now lives under `pipeline/`.
 - Snowflake is the source of truth for RAW, SILVER, and GOLD data.
-- dbt remains the planned testing layer on top of Snowflake.
+- dbt is the active validation layer on top of Snowflake and runs after transform publication.
 - Airflow uses a Postgres metadata database locally so `LocalExecutor` can run multiple tasks without the SQLite bottleneck.
 - Ingest and transform are scheduled separately for both hourly and monthly cadence groups.
 - Only ingest talks to the EIA API; transform scans RAW and state to determine what still needs publishing.

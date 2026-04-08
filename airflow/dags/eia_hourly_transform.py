@@ -21,6 +21,7 @@ from pipeline.orchestration.transform_runtime import (
     plan_transform_cadence,
     refresh_cadence_dimensions,
 )
+from pipeline.orchestration.validation_runtime import run_dbt_validation
 
 CADENCE_GROUP = "hourly"
 
@@ -64,6 +65,12 @@ def _refresh_dimensions(**context):
         return refresh_cadence_dimensions(session, settings.database, CADENCE_GROUP)
     finally:
         close_session(session)
+
+
+def _validate_with_dbt(**context):
+    ti = context["ti"]
+    plan_summary = ti.xcom_pull(task_ids="plan_transform") or {}
+    return run_dbt_validation(plan_summary)
 
 
 def _finalize_transform_state(**context):
@@ -154,10 +161,11 @@ with DAG(
     silver = PythonOperator(task_id="build_silver_partitions", python_callable=_build_silver_partitions)
     gold = PythonOperator(task_id="build_gold_partitions", python_callable=_build_gold_partitions)
     refresh = PythonOperator(task_id="refresh_dimensions", python_callable=_refresh_dimensions)
+    validate = PythonOperator(task_id="validate_with_dbt", python_callable=_validate_with_dbt)
     finalize = PythonOperator(task_id="finalize_transform_state", python_callable=_finalize_transform_state)
     continue_bootstrap = PythonOperator(
         task_id="continue_bootstrap_if_needed",
         python_callable=_continue_bootstrap_if_needed,
     )
 
-    plan >> silver >> gold >> refresh >> finalize >> continue_bootstrap
+    plan >> silver >> gold >> refresh >> validate >> finalize >> continue_bootstrap

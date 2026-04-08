@@ -1,0 +1,39 @@
+selectors:
+  - name: hourly_silver
+    definition:
+      method: tag
+      value: hourly_silver
+  - name: hourly_gold
+    definition:
+      method: tag
+      value: hourly_gold
+  - name: monthly_silver
+    definition:
+      method: tag
+      value: monthly_silver
+  - name: monthly_gold
+    definition:
+      method: tag
+      value: monthly_gold
+  - name: hourly_full_validation
+    definition:
+      union:
+        - method: tag
+          value: hourly_silver
+        - method: tag
+          value: hourly_gold
+  - name: monthly_full_validation
+    definition:
+      union:
+        - method: tag
+          value: monthly_silver
+        - method: tag
+          value: monthly_gold
+  - name: freshness_hourly_raw
+    definition:
+      method: tag
+      value: freshness_hourly_raw
+  - name: freshness_monthly_raw
+    definition:
+      method: tag
+      value: freshness_monthly_raw

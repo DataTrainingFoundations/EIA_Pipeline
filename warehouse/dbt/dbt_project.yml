@@ -1,0 +1,31 @@
+name: eia_pipeline
+version: 1.0.0
+config-version: 2
+
+profile: eia_pipeline
+
+model-paths:
+  - models
+analysis-paths:
+  - analyses
+test-paths:
+  - tests
+macro-paths:
+  - macros
+seed-paths:
+  - seeds
+snapshot-paths:
+  - snapshots
+
+clean-targets:
+  - target
+  - dbt_packages
+  - logs
+
+vars:
+  cadence_group: ""
+  start_date: ""
+  end_date: ""
+  dataset_id: ""
+  bootstrap_mode: false
+  partition_dates: []

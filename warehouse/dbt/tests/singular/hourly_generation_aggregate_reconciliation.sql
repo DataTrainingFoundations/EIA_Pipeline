@@ -1,4 +1,4 @@
-{{ config(tags=["hourly_gold"]) }}
+{{ config(tags=["hourly_gold", "hourly_generation"]) }}
 
 with fact_rollup as (
     select

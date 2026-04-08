@@ -22,6 +22,16 @@ selectors:
           value: hourly_silver
         - method: tag
           value: hourly_gold
+  - name: hourly_generation_validation
+    definition:
+      union:
+        - method: tag
+          value: hourly_generation
+  - name: hourly_demand_validation
+    definition:
+      union:
+        - method: tag
+          value: hourly_demand
   - name: monthly_full_validation
     definition:
       union:
@@ -29,11 +39,37 @@ selectors:
           value: monthly_silver
         - method: tag
           value: monthly_gold
+  - name: monthly_retail_sales_validation
+    definition:
+      union:
+        - method: tag
+          value: monthly_retail_sales
+  - name: monthly_power_operational_validation
+    definition:
+      union:
+        - method: tag
+          value: monthly_power_operational
   - name: freshness_hourly_raw
     definition:
       method: tag
       value: freshness_hourly_raw
+  - name: freshness_hourly_generation
+    definition:
+      method: tag
+      value: freshness_hourly_generation
+  - name: freshness_hourly_demand
+    definition:
+      method: tag
+      value: freshness_hourly_demand
   - name: freshness_monthly_raw
     definition:
       method: tag
       value: freshness_monthly_raw
+  - name: freshness_monthly_retail_sales
+    definition:
+      method: tag
+      value: freshness_monthly_retail_sales
+  - name: freshness_monthly_power_operational
+    definition:
+      method: tag
+      value: freshness_monthly_power_operational

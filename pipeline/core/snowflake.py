@@ -437,14 +437,54 @@ def raw_partitions_for_dataset(
 ) -> list[dict[str, Any]]:
     if not table_exists(session, table_name):
         return []
-    return list_partition_status(
-        session,
-        table_name,
-        frequency=frequency,
-        processed_column="_INGESTED_AT",
-        start_date=start_date,
-        end_date=end_date,
-    )
+    if frequency != "hourly":
+        return list_partition_status(
+            session,
+            table_name,
+            frequency=frequency,
+            processed_column="_INGESTED_AT",
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    partition_expr = raw_partition_expression(frequency)
+    clauses = [f"{partition_expr} IS NOT NULL"]
+    if start_date:
+        clauses.append(f"{partition_expr} >= TO_DATE({_sql_literal(start_date)})")
+    if end_date:
+        clauses.append(f"{partition_expr} <= TO_DATE({_sql_literal(end_date)})")
+    where_sql = " AND ".join(clauses)
+    current_partition = current_partition_for_frequency(frequency)
+    rows = session.sql(
+        f"""
+        SELECT
+            {partition_expr} AS partition_date,
+            MAX(_INGESTED_AT) AS processed_at,
+            COUNT(*) AS row_count,
+            COUNT(DISTINCT PERIOD) AS distinct_period_count
+        FROM {table_name}
+        WHERE {where_sql}
+        GROUP BY 1
+        ORDER BY 1
+        """
+    ).collect()
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        partition_date = _normalize_result_value(row["PARTITION_DATE"])
+        if not partition_date:
+            continue
+        distinct_period_count = int(row["DISTINCT_PERIOD_COUNT"] or 0)
+        results.append(
+            {
+                "partition_date": partition_date,
+                "processed_at": _normalize_result_value(row["PROCESSED_AT"]),
+                "row_count": int(row["ROW_COUNT"]),
+                "distinct_period_count": distinct_period_count,
+                # Historical hourly dates are only considered publishable when all 24 hours are present.
+                "is_complete": partition_date >= current_partition or distinct_period_count >= 24,
+            }
+        )
+    return results
 
 
 def pipeline_partitions_for_table(

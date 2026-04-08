@@ -100,6 +100,68 @@ def _freshness_selector_for_cadence(cadence_group: str) -> str:
     return selectors[cadence_group]
 
 
+_DATASET_VALIDATION_SELECTORS = {
+    "hourly": {
+        "electricity_generation_hourly": "hourly_generation_validation",
+        "electricity_demand_hourly": "hourly_demand_validation",
+    },
+    "monthly": {
+        "electricity_retail_sales_monthly": "monthly_retail_sales_validation",
+        "electricity_power_operational_data_monthly": "monthly_power_operational_validation",
+    },
+}
+
+
+_DATASET_FRESHNESS_SELECTORS = {
+    "hourly": {
+        "electricity_generation_hourly": "freshness_hourly_generation",
+        "electricity_demand_hourly": "freshness_hourly_demand",
+    },
+    "monthly": {
+        "electricity_retail_sales_monthly": "freshness_monthly_retail_sales",
+        "electricity_power_operational_data_monthly": "freshness_monthly_power_operational",
+    },
+}
+
+
+def _datasets_with_planned_work(plan_summary: dict[str, Any]) -> list[str]:
+    datasets: list[str] = []
+    for dataset_id, plan in plan_summary.get("dataset_plans", {}).items():
+        if plan.get("planned_partitions"):
+            datasets.append(str(dataset_id))
+    return sorted(datasets)
+
+
+def _selector_args(*, cadence_group: str, planned_datasets: list[str]) -> list[str]:
+    if not planned_datasets:
+        return ["--selector", _selector_for_cadence(cadence_group)]
+    selectors = _DATASET_VALIDATION_SELECTORS.get(cadence_group, {})
+    resolved = sorted({selectors[dataset_id] for dataset_id in planned_datasets if dataset_id in selectors})
+    if not resolved:
+        return ["--selector", _selector_for_cadence(cadence_group)]
+    if len(resolved) == 1:
+        return ["--selector", resolved[0]]
+    args: list[str] = []
+    for selector in resolved:
+        args.extend(["--selector", selector])
+    return args
+
+
+def _freshness_selector_args(*, cadence_group: str, planned_datasets: list[str]) -> list[str]:
+    if not planned_datasets:
+        return ["--selector", _freshness_selector_for_cadence(cadence_group)]
+    selectors = _DATASET_FRESHNESS_SELECTORS.get(cadence_group, {})
+    resolved = sorted({selectors[dataset_id] for dataset_id in planned_datasets if dataset_id in selectors})
+    if not resolved:
+        return ["--selector", _freshness_selector_for_cadence(cadence_group)]
+    if len(resolved) == 1:
+        return ["--selector", resolved[0]]
+    args: list[str] = []
+    for selector in resolved:
+        args.extend(["--selector", selector])
+    return args
+
+
 def _partitions_for_plan(plan_summary: dict[str, Any]) -> list[str]:
     partitions: set[str] = set()
     for plan in plan_summary.get("dataset_plans", {}).values():
@@ -197,13 +259,19 @@ def run_dbt_validation(plan_summary: dict[str, Any]) -> dict[str, Any]:
 
     target_name = _default_target()
     dbt_vars = _build_dbt_vars(plan_summary)
+    planned_datasets = _datasets_with_planned_work(plan_summary)
     summary: dict[str, Any] = {
         "cadence_group": cadence_group,
         "project_dir": str(project_dir),
         "target": target_name,
         "vars": dbt_vars,
+        "planned_datasets": planned_datasets,
         "commands": [],
     }
+    if not planned_datasets:
+        summary["status"] = "skipped"
+        summary["reason"] = "no_planned_partitions"
+        return summary
     dbt_env = {
         "DBT_CADENCE_GROUP": str(dbt_vars["cadence_group"]),
         "DBT_START_DATE": str(dbt_vars["start_date"]),
@@ -240,9 +308,8 @@ def run_dbt_validation(plan_summary: dict[str, Any]) -> dict[str, Any]:
             str(profiles_dir),
             "--target",
             target_name,
-            "--selector",
-            _freshness_selector_for_cadence(cadence_group),
         ]
+        freshness_command.extend(_freshness_selector_args(cadence_group=cadence_group, planned_datasets=planned_datasets))
         freshness_result = _run_dbt_command(
             freshness_command,
             project_dir=project_dir,
@@ -266,9 +333,8 @@ def run_dbt_validation(plan_summary: dict[str, Any]) -> dict[str, Any]:
             str(profiles_dir),
             "--target",
             target_name,
-            "--selector",
-            _selector_for_cadence(cadence_group),
         ]
+        test_command.extend(_selector_args(cadence_group=cadence_group, planned_datasets=planned_datasets))
         test_result = _run_dbt_command(
             test_command,
             project_dir=project_dir,

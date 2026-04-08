@@ -115,7 +115,11 @@ def plan_transform_partitions(
         start_date=scan_start_date,
         end_date=scan_end_date,
     )
-    raw_map = {item["partition_date"]: item for item in raw_partitions if item["partition_date"]}
+    raw_map = {
+        item["partition_date"]: item
+        for item in raw_partitions
+        if item["partition_date"] and bool(item.get("is_complete", True))
+    }
     silver_map = pipeline_partitions_for_table(
         session,
         f"{database}.SILVER.{get_silver_table_name(dataset_id)}",

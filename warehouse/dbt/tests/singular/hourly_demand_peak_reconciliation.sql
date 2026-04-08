@@ -1,4 +1,4 @@
-{{ config(tags=["hourly_gold"]) }}
+{{ config(tags=["hourly_gold", "hourly_demand"]) }}
 
 with fact_peaks as (
     select

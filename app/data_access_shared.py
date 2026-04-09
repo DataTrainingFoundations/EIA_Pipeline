@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 import snowflake.connector
+import streamlit as st
 
 from pipeline.core.settings import load_app_snowflake_settings
 
@@ -16,10 +17,17 @@ DIM_FUEL_TYPE = "DIM_FUEL_TYPE"
 SILVER_ELECTRICITY_RETAIL_SALES = "SILVER_ELECTRICITY_RETAIL_SALES"
 SILVER_ELECTRICITY_POWER_OPERATIONAL_DATA = "SILVER_ELECTRICITY_POWER_OPERATIONAL_DATA"
 FACT_SALES_MONTHLY = "FACT_SALES_MONTHLY"
+FAST_CACHE_TTL = 60
+SLOW_CACHE_TTL = 300
+
+
+@st.cache_resource
+def get_app_snowflake_settings():
+    return load_app_snowflake_settings()
 
 
 def _connection_kwargs() -> dict[str, object]:
-    settings = load_app_snowflake_settings()
+    settings = get_app_snowflake_settings()
     return {
         "account": settings.account,
         "user": settings.user,
@@ -35,13 +43,37 @@ def get_connection():
     return snowflake.connector.connect(**_connection_kwargs())
 
 
-def _safe_read_sql(query: str) -> pd.DataFrame:
+def _run_sql(query: str) -> pd.DataFrame:
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(query)
             frame = cur.fetch_pandas_all()
             frame.columns = [column.lower() for column in frame.columns]
             return frame
+
+
+@st.cache_data(ttl=FAST_CACHE_TTL, show_spinner=False)
+def _safe_read_sql_fast_cached(query: str) -> pd.DataFrame:
+    return _run_sql(query)
+
+
+@st.cache_data(ttl=SLOW_CACHE_TTL, show_spinner=False)
+def _safe_read_sql_slow_cached(query: str) -> pd.DataFrame:
+    return _run_sql(query)
+
+
+def _safe_read_sql(query: str, ttl: int = FAST_CACHE_TTL) -> pd.DataFrame:
+    if ttl >= SLOW_CACHE_TTL:
+        return _safe_read_sql_slow_cached(query)
+    return _safe_read_sql_fast_cached(query)
+
+
+@st.cache_data(ttl=FAST_CACHE_TTL, show_spinner=False)
+def get_connection_status() -> tuple[bool, object]:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select current_timestamp()")
+            return True, cur.fetchone()[0]
 
 
 def sql_literal(value: str) -> str:

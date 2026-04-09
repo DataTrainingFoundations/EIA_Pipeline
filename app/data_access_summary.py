@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
-from contextlib import closing
 from typing import Any
-
-import streamlit as st
 
 from data_access_shared import (
     AGG_DAILY_GENERATION,
     DIM_FUEL_TYPE,
+    FAST_CACHE_TTL,
     FACT_DEMAND_HOURLY,
     FACT_GENERATION_HOURLY,
     FACT_SALES_MONTHLY,
+    SLOW_CACHE_TTL,
     SILVER_ELECTRICITY_RETAIL_SALES,
     _safe_read_sql,
     qualified_table,
-    get_connection,
 )
 
 MONTHLY_SALES_TABLE = qualified_table("SILVER", SILVER_ELECTRICITY_RETAIL_SALES)
@@ -28,19 +26,15 @@ RAW_OPERATIONAL_TABLE = qualified_table("RAW", "ELECTRICITY_POWER_OPERATIONAL_RA
 META_PIPELINE_STATE = qualified_table("META", "PIPELINE_RUN_STATE")
 
 
-@st.cache_data(ttl=60)
 def table_has_rows(table_name: str = FACT_GENERATION_HOURLY) -> bool:
     query = f"select exists (select 1 from {table_name} limit 1)"
     try:
-        with get_connection() as conn:
-            with closing(conn.cursor()) as cur:
-                cur.execute(query)
-                return bool(cur.fetchone()[0])
+        result = _safe_read_sql(query, ttl=FAST_CACHE_TTL)
+        return bool(result.iloc[0, 0])
     except Exception:
         return False
 
 
-@st.cache_data(ttl=60)
 def get_generation_coverage() -> dict[str, Any]:
     query = f"""
     select
@@ -51,10 +45,9 @@ def get_generation_coverage() -> dict[str, Any]:
         count(distinct fuel_code) as fuel_count
     from {FACT_GENERATION_HOURLY}
     """
-    return _safe_read_sql(query).iloc[0].to_dict()
+    return _safe_read_sql(query, ttl=FAST_CACHE_TTL).iloc[0].to_dict()
 
 
-@st.cache_data(ttl=60)
 def get_demand_coverage() -> dict[str, Any]:
     query = f"""
     select
@@ -64,10 +57,9 @@ def get_demand_coverage() -> dict[str, Any]:
         count(distinct ba_code) as ba_count
     from {FACT_DEMAND_HOURLY}
     """
-    return _safe_read_sql(query).iloc[0].to_dict()
+    return _safe_read_sql(query, ttl=FAST_CACHE_TTL).iloc[0].to_dict()
 
 
-@st.cache_data(ttl=60)
 def get_daily_generation_coverage() -> dict[str, Any]:
     query = f"""
     select
@@ -76,10 +68,9 @@ def get_daily_generation_coverage() -> dict[str, Any]:
         count(*) as row_count
     from {AGG_DAILY_GENERATION}
     """
-    return _safe_read_sql(query).iloc[0].to_dict()
+    return _safe_read_sql(query, ttl=FAST_CACHE_TTL).iloc[0].to_dict()
 
 
-@st.cache_data(ttl=60)
 def get_monthly_sales_coverage() -> dict[str, Any]:
     query = f"""
     select
@@ -91,10 +82,9 @@ def get_monthly_sales_coverage() -> dict[str, Any]:
     from {MONTHLY_SALES_TABLE}
     where sector_abbr != 'ALL'
     """
-    return _safe_read_sql(query).iloc[0].to_dict()
+    return _safe_read_sql(query, ttl=FAST_CACHE_TTL).iloc[0].to_dict()
 
 
-@st.cache_data(ttl=60)
 def get_pipeline_state_summary() -> list[dict[str, Any]]:
     query = f"""
     select
@@ -109,10 +99,9 @@ def get_pipeline_state_summary() -> list[dict[str, Any]]:
     from {META_PIPELINE_STATE}
     order by dataset_id
     """
-    return _safe_read_sql(query).to_dict("records")
+    return _safe_read_sql(query, ttl=FAST_CACHE_TTL).to_dict("records")
 
 
-@st.cache_data(ttl=60)
 def get_raw_coverage_summary() -> list[dict[str, Any]]:
     query = f"""
     select 'electricity_generation_hourly' as dataset_id, min(try_to_date(substr(period, 1, 10))) as min_partition, max(try_to_date(substr(period, 1, 10))) as max_partition, count(*) as row_count from {RAW_GENERATION_TABLE}
@@ -124,10 +113,9 @@ def get_raw_coverage_summary() -> list[dict[str, Any]]:
     select 'electricity_power_operational_data_monthly' as dataset_id, min(to_date(period || '-01')) as min_partition, max(to_date(period || '-01')) as max_partition, count(*) as row_count from {RAW_OPERATIONAL_TABLE}
     order by dataset_id
     """
-    return _safe_read_sql(query).to_dict("records")
+    return _safe_read_sql(query, ttl=FAST_CACHE_TTL).to_dict("records")
 
 
-@st.cache_data(ttl=60)
 def get_gold_coverage_summary() -> list[dict[str, Any]]:
     query = f"""
     select 'fact_generation_hourly' as table_name, min(partition_date) as min_partition, max(partition_date) as max_partition, count(*) as row_count from {FACT_GENERATION_HOURLY}
@@ -139,10 +127,9 @@ def get_gold_coverage_summary() -> list[dict[str, Any]]:
     select 'fact_sales_monthly' as table_name, min(partition_date) as min_partition, max(partition_date) as max_partition, count(*) as row_count from {MONTHLY_GOLD_TABLE}
     order by table_name
     """
-    return _safe_read_sql(query).to_dict("records")
+    return _safe_read_sql(query, ttl=FAST_CACHE_TTL).to_dict("records")
 
 
-@st.cache_data(ttl=60)
 def get_generation_zero_value_summary(limit: int = 14) -> list[dict[str, Any]]:
     query = f"""
     select
@@ -157,18 +144,16 @@ def get_generation_zero_value_summary(limit: int = 14) -> list[dict[str, Any]]:
     order by report_date desc, fuel_code
     limit {int(limit)}
     """
-    return _safe_read_sql(query).to_dict("records")
+    return _safe_read_sql(query, ttl=FAST_CACHE_TTL).to_dict("records")
 
 
-@st.cache_data(ttl=60)
 def list_ba_codes(table_name: str = FACT_GENERATION_HOURLY) -> list[str]:
     query = f"select distinct ba_code from {table_name} order by ba_code"
-    df = _safe_read_sql(query)
+    df = _safe_read_sql(query, ttl=SLOW_CACHE_TTL)
     return df["ba_code"].dropna().tolist()
 
 
-@st.cache_data(ttl=60)
 def list_fuel_codes() -> list[str]:
     query = f"select fuel_code, fuel_name from {DIM_FUEL_TYPE} order by fuel_code"
-    df = _safe_read_sql(query)
+    df = _safe_read_sql(query, ttl=SLOW_CACHE_TTL)
     return df["fuel_code"].dropna().tolist()

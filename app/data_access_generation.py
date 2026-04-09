@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pandas as pd
-import streamlit as st
 
 from data_access_shared import (
+    FAST_CACHE_TTL,
     AGG_DAILY_GENERATION,
     FACT_GENERATION_HOURLY,
     _safe_read_sql,
@@ -14,7 +14,6 @@ from data_access_shared import (
 )
 
 
-@st.cache_data(ttl=60)
 def load_generation_hourly(
     start_ts: str | None = None,
     end_ts: str | None = None,
@@ -31,10 +30,9 @@ def load_generation_hourly(
     if fuel_codes:
         query += f" and fuel_code in ({sql_in_list(fuel_codes)})"
     query += " order by period_ts, ba_code, fuel_code"
-    return _safe_read_sql(query)
+    return _safe_read_sql(query, ttl=FAST_CACHE_TTL)
 
 
-@st.cache_data(ttl=60)
 def load_daily_generation(
     start_date: str | None = None,
     end_date: str | None = None,
@@ -48,10 +46,9 @@ def load_daily_generation(
     if fuel_codes:
         query += f" and fuel_code in ({sql_in_list(fuel_codes)})"
     query += " order by report_date, fuel_code"
-    return _safe_read_sql(query)
+    return _safe_read_sql(query, ttl=FAST_CACHE_TTL)
 
 
-@st.cache_data(ttl=60)
 def load_latest_generation_snapshot(
     start_ts: str | None = None,
     end_ts: str | None = None,
@@ -88,4 +85,4 @@ def load_latest_generation_snapshot(
     group by f.ba_code, f.ba_name, f.period_ts
     order by total_gwh desc
     """
-    return _safe_read_sql(query)
+    return _safe_read_sql(query, ttl=FAST_CACHE_TTL)

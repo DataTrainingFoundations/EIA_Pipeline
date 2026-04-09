@@ -66,6 +66,59 @@ OPS_STABLE_COLS = [
 RENEWABLE_FUELS = {"SUN", "WND", "WAT"}
 FOSSIL_FUELS = {"NG", "COL"}
 NUCLEAR_FUELS = {"NUC"}
+VALID_STATE_IDS = {
+    "AK",
+    "AL",
+    "AR",
+    "AZ",
+    "CA",
+    "CO",
+    "CT",
+    "DC",
+    "DE",
+    "FL",
+    "GA",
+    "HI",
+    "IA",
+    "ID",
+    "IL",
+    "IN",
+    "KS",
+    "KY",
+    "LA",
+    "MA",
+    "MD",
+    "ME",
+    "MI",
+    "MN",
+    "MO",
+    "MS",
+    "MT",
+    "NC",
+    "ND",
+    "NE",
+    "NH",
+    "NJ",
+    "NM",
+    "NV",
+    "NY",
+    "OH",
+    "OK",
+    "OR",
+    "PA",
+    "RI",
+    "SC",
+    "SD",
+    "TN",
+    "TX",
+    "UT",
+    "VA",
+    "VT",
+    "WA",
+    "WI",
+    "WV",
+    "WY",
+}
 
 
 def _silver_table(database: str, table_name: str) -> str:
@@ -128,6 +181,7 @@ def _stabilize_monthly_sales(df):
         .dropna(subset=["period", "state_id", "sector_abbr"])
         .drop_duplicates(SALES_STABLE_COLS)
         .filter(col("sector_abbr") != lit("ALL"))
+        .filter(col("state_id").isin(list(VALID_STATE_IDS)))
     )
 
 
@@ -136,6 +190,7 @@ def _stabilize_monthly_ops(df):
         df.select(*OPS_STABLE_COLS)
         .dropna(subset=["period", "state_id", "sector_id", "fuel_type_id"])
         .drop_duplicates(OPS_STABLE_COLS)
+        .filter(col("state_id").isin(list(VALID_STATE_IDS)))
     )
 
 
@@ -298,9 +353,9 @@ def _build_monthly_operational_sales(session, database: str, target_date: str, g
             lit(partition_date).alias("partition_date"),
         )
     )
-    monthly_table = _gold_table(database, gold_tables["gold_electricity_operational_sales"])
+    monthly_table = _gold_table(database, gold_tables["fact_sales_monthly"])
     return {
-        "gold_electricity_operational_sales": _write_partitioned_table(session, combined, monthly_table, partition_date)
+        "fact_sales_monthly": _write_partitioned_table(session, combined, monthly_table, partition_date)
     }
 
 

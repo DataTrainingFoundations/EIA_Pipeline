@@ -8,7 +8,7 @@ with silver_max as (
 ),
 gold_max as (
     select max(partition_date) as max_gold_partition
-    from {{ source('gold', 'GOLD_ELECTRICITY_OPERATIONAL_SALES') }}
+    from {{ source('gold', 'FACT_SALES_MONTHLY') }}
 )
 select *
 from silver_max

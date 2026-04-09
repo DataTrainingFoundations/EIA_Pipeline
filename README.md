@@ -31,7 +31,7 @@ Gold shape:
 - `DIM_FUEL_TYPE`
 - `AGG_DAILY_GENERATION`
 - `AGG_DAILY_DEMAND_PEAK`
-- `GOLD_ELECTRICITY_OPERATIONAL_SALES`
+- `FACT_SALES_MONTHLY`
 
 The gold layer is intentionally a pragmatic star-schema-style serving model for the Streamlit app.
 

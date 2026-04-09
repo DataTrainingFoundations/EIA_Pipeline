@@ -94,7 +94,7 @@ with card_right:
 <div class="dashboard-card">
     <h3>Monthly Sales Trends</h3>
     <p>Track monthly retail sales, revenue, price, and customers by state and sector, with fuel-mix overlays when available.</p>
-    <p><strong>Uses:</strong> GOLD_ELECTRICITY_OPERATIONAL_SALES, SILVER_ELECTRICITY_RETAIL_SALES</p>
+    <p><strong>Uses:</strong> FACT_SALES_MONTHLY, SILVER_ELECTRICITY_RETAIL_SALES</p>
 </div>
 """,
         unsafe_allow_html=True,

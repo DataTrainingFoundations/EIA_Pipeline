@@ -29,10 +29,16 @@ METRIC_LABELS = {
 METRIC_TICK_FORMAT = {
     "sales": {"ticksuffix": " MWh", "tickprefix": ""},
     "revenue": {"ticksuffix": "", "tickprefix": "$"},
-    "price": {"ticksuffix": " ¢", "tickprefix": ""},
+    "price": {"ticksuffix": " c", "tickprefix": ""},
     "customers": {"ticksuffix": "", "tickprefix": ""},
 }
-SECTOR_COLORS = px.colors.qualitative.Set2
+SECTOR_COLORS_BY_ABBR = {
+    "COM": "#74df84",
+    "IND": "#e96379",
+    "OTH": "#9c79ef",
+    "RES": "#5292b7",
+    "TRA": "#f3ad2b",
+}
 
 
 def _load_combined_data(
@@ -61,6 +67,21 @@ def _line_fill(trace) -> None:
     g = int(color[3:5], 16)
     b = int(color[5:7], 16)
     trace.update(fill="tozeroy", fillcolor=f"rgba({r},{g},{b},0.15)", line_width=2, marker_size=5)
+
+
+def _sector_color_map(df: pd.DataFrame) -> dict[str, str]:
+    if df.empty or "sector_abbr" not in df.columns or "sector_name" not in df.columns:
+        return {}
+    pairs = (
+        df[["sector_abbr", "sector_name"]]
+        .dropna()
+        .drop_duplicates()
+        .sort_values(["sector_abbr", "sector_name"])
+    )
+    return {
+        row["sector_name"]: SECTOR_COLORS_BY_ABBR.get(row["sector_abbr"], "#0d9488")
+        for _, row in pairs.iterrows()
+    }
 
 
 st.title("Monthly Electricity Sales Trends")
@@ -114,6 +135,7 @@ sales_df["period"] = pd.to_datetime(sales_df["period"])
 sales_df["year"] = sales_df["period"].dt.year
 sales_df["month"] = sales_df["period"].dt.month
 sales_df["year_month"] = sales_df["period"].dt.strftime("%Y-%m")
+sector_color_map = _sector_color_map(sales_df)
 
 all_sectors = sorted(sales_df["sector_name"].dropna().unique().tolist())
 all_states = sorted(sales_df["state_id"].dropna().unique().tolist())
@@ -159,7 +181,7 @@ if len(complete_months) >= 2 and complete_months.iloc[-2] != 0:
 
 k1.metric("Total Sales", f"{filtered_df['sales'].sum():,.0f} MWh", None if mom_delta is None else f"{mom_delta:+.1f}% MoM")
 k2.metric("Total Revenue", f"${filtered_df['revenue'].sum():,.0f}")
-k3.metric("Avg Retail Price", f"{filtered_df['price'].mean():.2f} ¢/kWh")
+k3.metric("Avg Retail Price", f"{filtered_df['price'].mean():.2f} c/kWh")
 k4.metric("Avg Monthly Customers", f"{filtered_df.groupby('period')['customers'].sum().mean():,.0f}")
 
 st.divider()
@@ -179,7 +201,7 @@ fig_sector = px.line(
     labels={"period": "Month", metric: metric_label, "sector_name": "Sector"},
     title=f"Monthly {metric_label} by sector",
     template="plotly_white",
-    color_discrete_sequence=SECTOR_COLORS,
+    color_discrete_map=sector_color_map or None,
 )
 for trace in fig_sector.data:
     _line_fill(trace)
@@ -204,7 +226,8 @@ fig_pie = px.pie(
     hole=0.42,
     title=f"{metric_label} share by sector",
     template="plotly_white",
-    color_discrete_sequence=SECTOR_COLORS,
+    color="sector_name",
+    color_discrete_map=sector_color_map or None,
 )
 fig_pie.update_traces(
     textposition="outside",
@@ -232,10 +255,34 @@ fig_share = px.area(
     labels={"period": "Month", "sales": "Share (%)", "sector_name": "Sector"},
     title="Sector share of total sales",
     template="plotly_white",
-    color_discrete_sequence=SECTOR_COLORS,
+    color_discrete_map=sector_color_map or None,
 )
 fig_share.update_layout(height=380, yaxis=dict(ticksuffix="%"))
 share_right.plotly_chart(fig_share, use_container_width=True)
+
+st.subheader("Annual Sector Share")
+st.caption("Annual share of total sales by sector highlights slower structural shifts beyond the monthly swings.")
+annual_sector_share = (
+    filtered_df.groupby(["year", "sector_name"], as_index=False)
+    .agg(sales=("sales", "sum"))
+    .sort_values(["year", "sector_name"])
+)
+annual_sector_share["share_pct"] = (
+    annual_sector_share["sales"] / annual_sector_share.groupby("year")["sales"].transform("sum") * 100
+)
+fig_annual_share = px.bar(
+    annual_sector_share,
+    x="year",
+    y="share_pct",
+    color="sector_name",
+    barmode="group",
+    labels={"year": "Year", "share_pct": "Share (%)", "sector_name": "Sector"},
+    title="Annual sector share of total sales",
+    template="plotly_white",
+    color_discrete_map=sector_color_map or None,
+)
+fig_annual_share.update_layout(height=380, yaxis=dict(ticksuffix="%"))
+st.plotly_chart(fig_annual_share, use_container_width=True)
 
 state_totals = (
     filtered_df.groupby("state_id", as_index=False)
@@ -318,7 +365,7 @@ if metric != "price" and len(complete_years) >= 2:
             labels={"year": "Year", "yoy_pct": "YoY Change (%)", "sector_name": "Sector"},
             title="Year-over-year growth by sector",
             template="plotly_white",
-            color_discrete_sequence=SECTOR_COLORS,
+            color_discrete_map=sector_color_map or None,
         )
         fig_yoy.add_hline(y=0, line_dash="dash", line_color="#6b7280")
         fig_yoy.update_layout(height=360)
@@ -345,7 +392,7 @@ fig_dual.add_trace(
     go.Scatter(
         x=price_sales["period"],
         y=price_sales["price"],
-        name="Avg Price (¢/kWh)",
+        name="Avg Price (c/kWh)",
         mode="lines+markers",
         line=dict(color="#f97316", width=2),
         marker=dict(size=4),
@@ -357,7 +404,7 @@ fig_dual.update_layout(
     title="Avg retail price vs total sales volume",
     xaxis_title="Month",
     yaxis=dict(title="Sales (MWh)", ticksuffix=" MWh"),
-    yaxis2=dict(title="Avg Price (¢/kWh)", ticksuffix=" ¢", overlaying="y", side="right"),
+    yaxis2=dict(title="Avg Price (c/kWh)", ticksuffix=" c", overlaying="y", side="right"),
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     height=380,
 )
@@ -391,7 +438,7 @@ else:
             hover_data={"period": "|%b %Y", "fossil_pct": ":.1f", "renewable_pct": ":.1f", scatter_y: ":.2f"},
             labels={
                 "fossil_pct": "Fossil share (%)",
-                scatter_y: "Avg retail price (¢/kWh)",
+                scatter_y: "Avg retail price (c/kWh)",
                 "renewable_pct": "Renewable share (%)",
             },
             title="Fossil generation share vs retail price",
@@ -440,7 +487,7 @@ else:
                 y="avg_price",
                 color="quartile",
                 markers=True,
-                labels={"period": "Month", "avg_price": "Avg retail price (¢/kWh)", "quartile": "Renewable tier"},
+                labels={"period": "Month", "avg_price": "Avg retail price (c/kWh)", "quartile": "Renewable tier"},
                 title="Retail price by renewable generation quartile",
                 template="plotly_white",
                 color_discrete_sequence=["#ef4444", "#f97316", "#22c55e", "#0d9488"],
@@ -449,7 +496,7 @@ else:
                 _line_fill(trace)
             quartile_fig.update_layout(
                 height=420,
-                yaxis=dict(ticksuffix=" ¢"),
+                yaxis=dict(ticksuffix=" c"),
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             )
             st.plotly_chart(quartile_fig, use_container_width=True)

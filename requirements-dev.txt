@@ -1,0 +1,5 @@
+-r airflow/requirements.txt
+-r pipeline/ingestion/requirements.txt
+coverage
+pytest-cov
+pandas

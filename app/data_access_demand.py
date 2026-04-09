@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pandas as pd
-import streamlit as st
 
 from data_access_shared import (
+    FAST_CACHE_TTL,
     AGG_DAILY_DEMAND_PEAK,
     FACT_DEMAND_HOURLY,
     _safe_read_sql,
@@ -14,7 +14,6 @@ from data_access_shared import (
 )
 
 
-@st.cache_data(ttl=60)
 def load_demand_hourly(
     start_ts: str | None = None,
     end_ts: str | None = None,
@@ -28,10 +27,9 @@ def load_demand_hourly(
     if ba_codes:
         query += f" and ba_code in ({sql_in_list(ba_codes)})"
     query += " order by period_ts, ba_code"
-    return _safe_read_sql(query)
+    return _safe_read_sql(query, ttl=FAST_CACHE_TTL)
 
 
-@st.cache_data(ttl=60)
 def load_daily_demand_peak(
     start_date: str | None = None,
     end_date: str | None = None,
@@ -45,10 +43,9 @@ def load_daily_demand_peak(
     if ba_codes:
         query += f" and ba_code in ({sql_in_list(ba_codes)})"
     query += " order by report_date, ba_code"
-    return _safe_read_sql(query)
+    return _safe_read_sql(query, ttl=FAST_CACHE_TTL)
 
 
-@st.cache_data(ttl=60)
 def load_latest_demand_snapshot(
     start_ts: str | None = None,
     end_ts: str | None = None,
@@ -78,4 +75,4 @@ def load_latest_demand_snapshot(
     join latest on f.period_ts = latest.period_ts
     order by f.ba_code
     """
-    return _safe_read_sql(query)
+    return _safe_read_sql(query, ttl=FAST_CACHE_TTL)

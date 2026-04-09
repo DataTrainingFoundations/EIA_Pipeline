@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import pandas as pd
-import streamlit as st
 
-from data_access_shared import SILVER_ELECTRICITY_POWER_OPERATIONAL_DATA, _safe_read_sql, qualified_table, sql_in_list, sql_literal
+from data_access_shared import SLOW_CACHE_TTL, SILVER_ELECTRICITY_POWER_OPERATIONAL_DATA, _safe_read_sql, qualified_table, sql_in_list, sql_literal
 from data_access_summary import table_has_rows
 from data_access_sales import load_sales_data
 
@@ -25,7 +24,6 @@ def _coerce_operational_frame(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-@st.cache_data(ttl=300)
 def load_operational_data(
     start_date: str | None = None,
     end_date: str | None = None,
@@ -49,10 +47,9 @@ def load_operational_data(
     if states:
         query += f" and state_id in ({sql_in_list(states)})"
     query += " order by period, state_id, fuel_type_id"
-    return _coerce_operational_frame(_safe_read_sql(query))
+    return _coerce_operational_frame(_safe_read_sql(query, ttl=SLOW_CACHE_TTL))
 
 
-@st.cache_data(ttl=300)
 def load_fuel_mix_by_state(
     start_date: str | None = None,
     end_date: str | None = None,
@@ -92,7 +89,6 @@ def load_fuel_mix_by_state(
     return grouped
 
 
-@st.cache_data(ttl=300)
 def load_fuel_mix_price_joined(
     start_date: str | None = None,
     end_date: str | None = None,
@@ -114,6 +110,5 @@ def load_fuel_mix_price_joined(
     )
 
 
-@st.cache_data(ttl=300)
 def operational_table_has_rows() -> bool:
     return table_has_rows(OPERATIONAL_TABLE)

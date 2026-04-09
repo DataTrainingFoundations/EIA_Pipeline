@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
-import streamlit as st
 
 from data_access_shared import (
     FACT_SALES_MONTHLY,
+    SLOW_CACHE_TTL,
     SILVER_ELECTRICITY_RETAIL_SALES,
     _safe_read_sql,
     qualified_table,
@@ -45,7 +45,6 @@ def _coerce_gold_frame(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-@st.cache_data(ttl=300)
 def load_sales_data(
     start_date: str | None = None,
     end_date: str | None = None,
@@ -75,10 +74,9 @@ def load_sales_data(
     if states:
         query += f" and state_id in ({sql_in_list(states)})"
     query += " order by period, state_id, sector_name"
-    return _coerce_sales_frame(_safe_read_sql(query))
+    return _coerce_sales_frame(_safe_read_sql(query, ttl=SLOW_CACHE_TTL))
 
 
-@st.cache_data(ttl=300)
 def load_sales_coverage() -> dict[str, Any]:
     query = f"""
     select
@@ -90,7 +88,7 @@ def load_sales_coverage() -> dict[str, Any]:
     from {SALES_TABLE}
     where sector_abbr != 'ALL'
     """
-    row = _safe_read_sql(query).iloc[0].to_dict()
+    row = _safe_read_sql(query, ttl=SLOW_CACHE_TTL).iloc[0].to_dict()
     if row.get("min_period") is not None:
         row["min_period"] = pd.to_datetime(row["min_period"])
     if row.get("max_period") is not None:
@@ -98,7 +96,6 @@ def load_sales_coverage() -> dict[str, Any]:
     return row
 
 
-@st.cache_data(ttl=300)
 def load_sales_gold(
     start_date: str | None = None,
     end_date: str | None = None,
@@ -115,28 +112,24 @@ def load_sales_gold(
     if states:
         query += f" and state_id in ({sql_in_list(states)})"
     query += " order by period, state_id, sector_name"
-    return _coerce_gold_frame(_safe_read_sql(query))
+    return _coerce_gold_frame(_safe_read_sql(query, ttl=SLOW_CACHE_TTL))
 
 
-@st.cache_data(ttl=300)
 def list_sales_states() -> list[str]:
     query = f"select distinct state_id from {SALES_TABLE} where sector_abbr != 'ALL' order by state_id"
-    df = _safe_read_sql(query)
+    df = _safe_read_sql(query, ttl=SLOW_CACHE_TTL)
     return df["state_id"].dropna().tolist()
 
 
-@st.cache_data(ttl=300)
 def list_sales_sectors() -> list[str]:
     query = f"select distinct sector_name from {SALES_TABLE} where sector_abbr != 'ALL' order by sector_name"
-    df = _safe_read_sql(query)
+    df = _safe_read_sql(query, ttl=SLOW_CACHE_TTL)
     return df["sector_name"].dropna().tolist()
 
 
-@st.cache_data(ttl=300)
 def sales_table_has_rows() -> bool:
     return table_has_rows(SALES_TABLE)
 
 
-@st.cache_data(ttl=300)
 def gold_table_has_rows() -> bool:
     return table_has_rows(MONTHLY_GOLD_TABLE)

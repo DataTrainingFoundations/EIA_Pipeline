@@ -5,7 +5,7 @@ from __future__ import annotations
 import streamlit as st
 
 from data_access import (
-    get_connection,
+    get_connection_status,
     get_daily_generation_coverage,
     get_demand_coverage,
     get_generation_coverage,
@@ -50,10 +50,7 @@ for longer-horizon state and sector analysis.
 )
 
 try:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("select current_timestamp()")
-            server_time = cur.fetchone()[0]
+    _, server_time = get_connection_status()
     st.success(f"Snowflake connected. Server time: {server_time}")
 except Exception as exc:
     st.error(f"Database connection failed: {exc}")

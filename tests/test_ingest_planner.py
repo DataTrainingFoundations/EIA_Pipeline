@@ -34,8 +34,10 @@ def test_ingest_planner_treats_incomplete_historical_hourly_partition_as_missing
     plan = ingest_planner.plan_ingest_windows(None, dataset, "EIA_PIPELINE", bootstrap_mode=True)
 
     assert plan.bootstrap_active is True
-    assert plan.ingest_start_date == "2026-04-01"
-    assert "2026-04-01" <= plan.ingest_end_date
+    assert plan.remaining_partitions_estimate == 6
+    assert plan.bootstrap_strategy == "latest_first"
+    assert plan.ingest_start_date == "2026-04-03"
+    assert plan.ingest_end_date == "2026-04-08"
 
 
 def test_transform_planner_excludes_incomplete_historical_hourly_raw_partition(monkeypatch) -> None:

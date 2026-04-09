@@ -106,6 +106,7 @@ with st.sidebar:
 - KPI strip: latest system generation and mix share.
 - Daily mix trend: fuel composition across the selected window.
 - Snapshot rankings: who is most fossil-heavy or renewable-heavy right now.
+- Balancing Authority(BA): Authority in charge of balancing supply and demand in a region.
 - Focus BA: hourly mix and share trend for one balancing authority.
 - Supporting analysis: national map and CSV export.
 """

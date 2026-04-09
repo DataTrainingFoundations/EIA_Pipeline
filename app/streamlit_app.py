@@ -59,48 +59,94 @@ except Exception as exc:
     st.error(f"Database connection failed: {exc}")
     st.stop()
 
+theme_mode = st.context.theme.type
+
 card_left, card_mid, card_right = st.columns(3)
-with card_left:
-    st.markdown(
-        """
-<div class="dashboard-card">
-    <h3>Generation Mix Monitor</h3>
-    <p>Track hourly generation by fuel type, rank fossil-heavy regions, and inspect one BA's mix over time.</p>
-    <p><strong>Uses:</strong> FACT_GENERATION_HOURLY, AGG_DAILY_GENERATION, DIM_FUEL_TYPE</p>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-    if hasattr(st, "page_link"):
-        st.page_link("pages/generation_mix_monitor.py", label="Open Generation Mix Monitor")
+if theme_mode == "dark":
+    with card_left:
+        st.markdown(
+            """
+    <div class="dashboard-card", style="background: lightslategray;">
+        <h3>Generation Mix Monitor</h3>
+        <p>Track hourly generation by fuel type, rank fossil-heavy regions, and inspect one BA's mix over time.</p>
+        <p><strong>Uses:</strong> FACT_GENERATION_HOURLY, AGG_DAILY_GENERATION, DIM_FUEL_TYPE</p>
+    </div>
+    """,
+            unsafe_allow_html=True,
+        )
+        if hasattr(st, "page_link"):
+            st.page_link("pages/generation_mix_monitor.py", label="Open Generation Mix Monitor")
 
-with card_mid:
-    st.markdown(
-        """
-<div class="dashboard-card">
-    <h3>Demand & Forecast Tracker</h3>
-    <p>Monitor latest forecast misses, track daily peaks, and drill into demand volatility for one BA.</p>
-    <p><strong>Uses:</strong> FACT_DEMAND_HOURLY, AGG_DAILY_DEMAND_PEAK, DIM_BALANCING_AUTHORITY</p>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-    if hasattr(st, "page_link"):
-        st.page_link("pages/demand_forecast_tracker.py", label="Open Demand & Forecast Tracker")
+    with card_mid:
+        st.markdown(
+            """
+    <div class="dashboard-card", style="background: lightslategray;">
+        <h3>Demand & Forecast Tracker</h3>
+        <p>Monitor latest forecast misses, track daily peaks, and drill into demand volatility for one BA.</p>
+        <p><strong>Uses:</strong> FACT_DEMAND_HOURLY, AGG_DAILY_DEMAND_PEAK, DIM_BALANCING_AUTHORITY</p>
+    </div>
+    """,
+            unsafe_allow_html=True,
+        )
+        if hasattr(st, "page_link"):
+            st.page_link("pages/demand_forecast_tracker.py", label="Open Demand & Forecast Tracker")
 
-with card_right:
-    st.markdown(
-        """
-<div class="dashboard-card">
-    <h3>Monthly Sales Trends</h3>
-    <p>Track monthly retail sales, revenue, price, and customers by state and sector, with fuel-mix overlays when available.</p>
-    <p><strong>Uses:</strong> GOLD_ELECTRICITY_OPERATIONAL_SALES, SILVER_ELECTRICITY_RETAIL_SALES</p>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-    if hasattr(st, "page_link"):
-        st.page_link("pages/monthly_sales_trends.py", label="Open Monthly Sales Trends")
+    with card_right:
+        st.markdown(
+            """
+    <div class="dashboard-card", style="background: lightslategray;">
+        <h3>Monthly Sales Trends</h3>
+        <p>Track monthly retail sales, revenue, price, and customers by state and sector, with fuel-mix overlays when available.</p>
+        <p><strong>Uses:</strong> GOLD_ELECTRICITY_OPERATIONAL_SALES, SILVER_ELECTRICITY_RETAIL_SALES</p>
+    </div>
+    """,
+            unsafe_allow_html=True,
+        )
+        if hasattr(st, "page_link"):
+            st.page_link("pages/monthly_sales_trends.py", label="Open Monthly Sales Trends")
+elif theme_mode == "light":
+    with card_left:
+        st.markdown(
+            """
+    <div class="dashboard-card">
+        <h3>Generation Mix Monitor</h3>
+        <p>Track hourly generation by fuel type, rank fossil-heavy regions, and inspect one BA's mix over time.</p>
+        <p><strong>Uses:</strong> FACT_GENERATION_HOURLY, AGG_DAILY_GENERATION, DIM_FUEL_TYPE</p>
+    </div>
+    """,
+            unsafe_allow_html=True,
+        )
+        if hasattr(st, "page_link"):
+            st.page_link("pages/generation_mix_monitor.py", label="Open Generation Mix Monitor")
+
+    with card_mid:
+        st.markdown(
+            """
+    <div class="dashboard-card">
+        <h3>Demand & Forecast Tracker</h3>
+        <p>Monitor latest forecast misses, track daily peaks, and drill into demand volatility for one BA.</p>
+        <p><strong>Uses:</strong> FACT_DEMAND_HOURLY, AGG_DAILY_DEMAND_PEAK, DIM_BALANCING_AUTHORITY</p>
+    </div>
+    """,
+            unsafe_allow_html=True,
+        )
+        if hasattr(st, "page_link"):
+            st.page_link("pages/demand_forecast_tracker.py", label="Open Demand & Forecast Tracker")
+
+    with card_right:
+        st.markdown(
+            """
+    <div class="dashboard-card"">
+        <h3>Monthly Sales Trends</h3>
+        <p>Track monthly retail sales, revenue, price, and customers by state and sector, with fuel-mix overlays when available.</p>
+        <p><strong>Uses:</strong> GOLD_ELECTRICITY_OPERATIONAL_SALES, SILVER_ELECTRICITY_RETAIL_SALES</p>
+    </div>
+    """,
+            unsafe_allow_html=True,
+        )
+        if hasattr(st, "page_link"):
+            st.page_link("pages/monthly_sales_trends.py", label="Open Monthly Sales Trends")
+
 
 st.subheader("Data coverage")
 cov_left, cov_mid, cov_right, cov_far = st.columns(4)

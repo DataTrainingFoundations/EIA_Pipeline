@@ -101,6 +101,7 @@ with st.sidebar:
             """
 - KPI strip: latest system demand, worst miss, and watchlist count.
 - Watchlist: BAs ranked by current forecast miss severity.
+- Balancing Authority(BA): Authority in charge of balancing supply and demand in a region.
 - Snapshot rankings: largest over-runs and under-runs right now.
 - Focus BA: demand versus forecast plus error volatility for one BA.
 - Supporting analysis: national map, scatter check, and CSV export.
@@ -382,6 +383,12 @@ with st.expander("Supporting analysis", expanded=False):
     map_df["lon"] = map_df["ba_code"].map(lambda code: RESPONDENT_GEO.get(code, {}).get("lon"))
     map_df = map_df.dropna(subset=["lat", "lon", "demand_gwh"])
     if not map_df.empty:
+
+        custom_scale = [
+            [0.0, "blue"],       # low values
+            [0.5, "lightgray"],  # midpoint (instead of white)
+            [1.0, "red"],        # high values
+        ]
         support_left.plotly_chart(
             px.scatter_geo(
                 map_df,
@@ -396,7 +403,7 @@ with st.expander("Supporting analysis", expanded=False):
                     "forecast_error_pct": ":.1f",
                     "demand_gwh": ":.2f",
                 },
-                color_continuous_scale="RdBu",
+                color_continuous_scale=custom_scale,
                 color_continuous_midpoint=0,
                 scope="usa",
                 title="Forecast error by BA",

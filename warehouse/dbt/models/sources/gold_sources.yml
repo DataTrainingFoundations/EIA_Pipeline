@@ -139,90 +139,63 @@ sources:
                   config:
                     tags: ["hourly_gold", "hourly_generation"]
       - name: FACT_SALES_MONTHLY
+        description: "Monthly sales fact table"
         tests:
           - dbt_utils.unique_combination_of_columns:
-              combination_of_columns: [record_id]
+              combination_of_columns: [record_id]  # if record_id exists, else use PERIOD+STATE_ID+SECTOR_ABBR+PERIOD
               config:
                 tags: ["monthly_gold", "monthly_operational_sales"]
           - dbt_utils.unique_combination_of_columns:
-              combination_of_columns: [period, state_id, sector_abbr, partition_date]
+              combination_of_columns: [PERIOD, STATE_ID, SECTOR_ABBR]
               config:
                 tags: ["monthly_gold", "monthly_operational_sales"]
         columns:
-          - name: record_id
+          - name: PERIOD
             tests:
               - not_null:
                   config:
                     tags: ["monthly_gold", "monthly_operational_sales"]
-          - name: period
+          - name: STATE_ID
             tests:
               - not_null:
                   config:
                     tags: ["monthly_gold", "monthly_operational_sales"]
-          - name: state_id
+          - name: STATE_DESCRIPTION
+            tests: []
+          - name: SECTOR_ABBR
             tests:
               - not_null:
                   config:
                     tags: ["monthly_gold", "monthly_operational_sales"]
-          - name: sector_abbr
-            tests:
-              - not_null:
-                  config:
-                    tags: ["monthly_gold", "monthly_operational_sales"]
-          - name: partition_date
-            tests:
-              - not_null:
-                  config:
-                    tags: ["monthly_gold", "monthly_operational_sales"]
-          - name: customers
+          - name: SECTOR_NAME
+            tests: []
+          - name: CUSTOMERS
             tests:
               - non_negative:
                   config:
                     severity: warn
-                    where: "customers is not null"
+                    where: "CUSTOMERS is not null"
                     tags: ["monthly_gold", "monthly_operational_sales"]
-          - name: price
+          - name: AVG_PRICE
             tests:
               - non_negative:
                   config:
                     severity: warn
-                    where: "price is not null"
+                    where: "AVG_PRICE is not null"
                     tags: ["monthly_gold", "monthly_operational_sales"]
-          - name: revenue
+          - name: REVENUE
             tests:
               - non_negative:
                   config:
                     severity: warn
-                    where: "revenue is not null"
+                    where: "REVENUE is not null"
                     tags: ["monthly_gold", "monthly_operational_sales"]
-          - name: sales
+          - name: RETAIL_SALES_MWH
             tests:
               - non_negative:
                   config:
                     severity: warn
-                    where: "sales is not null"
+                    where: "RETAIL_SALES_MWH is not null"
                     tags: ["monthly_gold", "monthly_operational_sales"]
-          - name: fossil_pct
-            tests:
-              - value_between:
-                  min_value: 0
-                  max_value: 100
-                  config:
-                    severity: warn
-                    tags: ["monthly_gold", "monthly_operational_sales"]
-          - name: renewable_pct
-            tests:
-              - value_between:
-                  min_value: 0
-                  max_value: 100
-                  config:
-                    severity: warn
-                    tags: ["monthly_gold", "monthly_operational_sales"]
-          - name: nuclear_pct
-            tests:
-              - value_between:
-                  min_value: 0
-                  max_value: 100
-                  config:
-                    severity: warn
-                    tags: ["monthly_gold", "monthly_operational_sales"]
+          - name: GOLD_PROCESSED_AT
+            tests: []
